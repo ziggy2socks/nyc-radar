@@ -12,28 +12,63 @@ export interface Complaint {
   status?: string;
 }
 
-// Top complaint categories with colors
+// Distinct colors for top complaint types — spread across the full spectrum
 export const COMPLAINT_COLORS: Record<string, string> = {
-  'Noise - Residential':     '#00ccff',
-  'Noise - Commercial':      '#00aadd',
-  'Noise - Street/Sidewalk': '#0088bb',
-  'Noise':                   '#00ccff',
-  'HEAT/HOT WATER':          '#ff6b35',
+  // Parking / vehicles — yellows & ambers
   'Illegal Parking':         '#ffe600',
   'Blocked Driveway':        '#ffaa00',
-  'Street Light Condition':  '#aaffcc',
-  'PAINT/PLASTER':           '#cc88ff',
-  'PLUMBING':                '#88aaff',
-  'Rodent':                  '#ff4466',
-  'Sanitation Condition':    '#88ff88',
-  'Graffiti':                '#ff88cc',
-  'Street Condition':        '#ffcc44',
-  'Building/Use':            '#44ccff',
-  'Dead/Dying Tree':         '#44ff88',
-  'Derelict Vehicle':        '#ff8844',
-  'Drug Activity':           '#ff4488',
-  'Homeless Person Assistance': '#88ccff',
-  'Encampment':              '#ffaa66',
+  'Abandoned Vehicle':       '#e6a800',
+  'Derelict Vehicle':        '#cc8800',
+
+  // Heat / water / plumbing — oranges & warm reds
+  'HEAT/HOT WATER':          '#ff6b35',
+  'WATER LEAK':              '#ff5522',
+  'PLUMBING':                '#e04830',
+  'Water System':            '#d4603a',
+
+  // Noise — cyans & teals
+  'Noise - Residential':     '#00ddff',
+  'Noise - Commercial':      '#00bbdd',
+  'Noise - Street/Sidewalk': '#009fbb',
+  'Noise - Vehicle':         '#00889e',
+  'Noise':                   '#00ccee',
+
+  // Streets / infrastructure — lime & green
+  'Street Condition':        '#88dd22',
+  'Traffic Signal Condition':'#66cc44',
+  'Street Light Condition':  '#44ee88',
+  'Sidewalk Condition':      '#22cc66',
+  'Sewer':                   '#33bb77',
+
+  // Building / interior — purples & magentas
+  'PAINT/PLASTER':           '#cc66ff',
+  'DOOR/WINDOW':             '#aa44ee',
+  'ELECTRIC':                '#dd55cc',
+  'FLOORING/STAIRS':         '#bb55dd',
+  'APPLIANCE':               '#9955cc',
+  'GENERAL':                 '#aa77dd',
+  'General Construction/Plumbing': '#9966cc',
+
+  // Sanitation — pinks & roses
+  'UNSANITARY CONDITION':    '#ff5599',
+  'Dirty Condition':         '#ff77aa',
+  'Illegal Dumping':         '#ee4488',
+  'Sanitation Condition':    '#ff6699',
+  'Rodent':                  '#ff3366',
+  'Graffiti':                '#ff44bb',
+
+  // Trees / nature — bright greens
+  'Damaged Tree':            '#00ff88',
+  'Dead/Dying Tree':         '#33ff77',
+  'Overgrown Tree/Branches': '#55ff66',
+
+  // People — blues
+  'Homeless Person Assistance': '#4499ff',
+  'Encampment':              '#5577ff',
+  'Drug Activity':           '#7755ff',
+
+  // Other
+  'Building/Use':            '#66bbff',
 };
 
 export const DEFAULT_COLOR = '#00ccff';

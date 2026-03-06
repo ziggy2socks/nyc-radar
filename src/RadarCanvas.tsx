@@ -203,7 +203,7 @@ export function RadarCanvas({ complaints, replayTime, dotLifetime, onPing, onBat
           highlightRef.current.set(d.key, ts);
           if (initialLoadDoneRef.current) {
             const complaint = d.complaint;
-            setTimeout(() => onPingRef.current(complaint), 500);
+            setTimeout(() => onPingRef.current(complaint), 300);
           }
         }
 
