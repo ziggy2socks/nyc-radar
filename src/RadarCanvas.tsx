@@ -198,14 +198,12 @@ export function RadarCanvas({ complaints, replayTime, dotLifetime, onPing, onBat
         const behind = (sweep - d.angle + 2 * Math.PI) % (2 * Math.PI);
         const beamOn = behind < 0.12;
 
-        // First beam pass: highlight + feed ping (synced)
+        // First beam pass: highlight now, feed ping after 1s delay
         if (beamOn && !highlightRef.current.has(d.key)) {
           highlightRef.current.set(d.key, ts);
           if (initialLoadDoneRef.current) {
-            onPingRef.current(d.complaint);
-          } else {
-            // Still in initial load — mark for batch
-            pingedRef.current.add(d.key);
+            const complaint = d.complaint;
+            setTimeout(() => onPingRef.current(complaint), 1000);
           }
         }
 
