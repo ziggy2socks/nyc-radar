@@ -82,6 +82,8 @@ export function RadarCanvas({ complaints, replayTime, dotLifetime, onPing, onBat
   const lastTsRef = useRef(0);
   const dotsRef = useRef<DotInfo[]>([]);
   const pingedRef = useRef<Set<string>>(new Set());
+  // Track when each dot got its first beam pass (key → animation frame timestamp)
+  const highlightRef = useRef<Map<string, number>>(new Map());
   const replayRef = useRef(replayTime);
   const lifetimeRef = useRef(dotLifetime);
   const onPingRef = useRef(onPing);
@@ -115,6 +117,7 @@ export function RadarCanvas({ complaints, replayTime, dotLifetime, onPing, onBat
     result.sort((a, b) => a.createdMs - b.createdMs);
     dotsRef.current = result;
     pingedRef.current.clear();
+    highlightRef.current.clear();
   }, [complaints]);
 
   useEffect(() => {
@@ -184,38 +187,78 @@ export function RadarCanvas({ complaints, replayTime, dotLifetime, onPing, onBat
       ctx.restore();
 
       // ── Dots ────────────────────────────────────
+      const HIGHLIGHT_DURATION = 1500; // 1.5s highlight animation
+
       for (let i = 0; i < dots.length; i++) {
         const d = dots[i];
         if (d.createdMs > now) continue;
         if (d.createdMs < windowStart) continue;
 
-        // Track which dots have been seen
+        // Track which dots have been seen (for feed)
         if (!pingedRef.current.has(d.key)) {
           pingedRef.current.add(d.key);
-          // Only fire individual pings after initial batch
           if (initialLoadDoneRef.current) {
             onPingRef.current(d.complaint);
           }
         }
 
-        // Beam flicker: how close is the sweep line to this dot right now?
+        // Beam proximity
         const behind = (sweep - d.angle + 2 * Math.PI) % (2 * Math.PI);
-        const flicker = behind < 0.12 ? (1 - behind / 0.12) * 0.4 : 0; // +40% max when beam is right on it
+        const beamOn = behind < 0.12;
 
-        // Base: 50% brightness, 2px
-        const alpha = 0.5 + flicker;
-
-        ctx.save();
-        ctx.globalAlpha = alpha;
-        ctx.fillStyle = d.color;
-        if (flicker > 0.1) {
-          ctx.shadowColor = d.color;
-          ctx.shadowBlur = 6 * flicker;
+        // First beam pass detection: beam touches dot → start highlight
+        if (beamOn && !highlightRef.current.has(d.key)) {
+          highlightRef.current.set(d.key, ts); // store the frame timestamp
         }
-        ctx.beginPath();
-        ctx.arc(d.x, d.y, 2, 0, 2 * Math.PI);
-        ctx.fill();
-        ctx.restore();
+
+        // Beam flicker for all dots
+        const flicker = beamOn ? (1 - behind / 0.12) * 0.4 : 0;
+
+        // Check if this dot is in its highlight phase
+        const highlightStart = highlightRef.current.get(d.key);
+        const highlightAge = highlightStart != null ? ts - highlightStart : -1;
+        const isHighlighting = highlightAge >= 0 && highlightAge < HIGHLIGHT_DURATION;
+
+        if (isHighlighting) {
+          // Highlight: 1.5x size, full brightness, expanding ring
+          const t = highlightAge / HIGHLIGHT_DURATION; // 0→1
+          const ringAlpha = 1 - t;
+          const ringRadius = 6 + t * 14;
+
+          // Bright dot
+          ctx.save();
+          ctx.globalAlpha = 0.9 - t * 0.4; // 0.9 → 0.5
+          ctx.fillStyle = d.color;
+          ctx.shadowColor = d.color;
+          ctx.shadowBlur = 12 * (1 - t);
+          ctx.beginPath();
+          ctx.arc(d.x, d.y, 3, 0, 2 * Math.PI); // 1.5x of base 2px
+          ctx.fill();
+          ctx.restore();
+
+          // Expanding ring
+          ctx.save();
+          ctx.globalAlpha = ringAlpha * 0.6;
+          ctx.strokeStyle = d.color;
+          ctx.lineWidth = 1;
+          ctx.beginPath();
+          ctx.arc(d.x, d.y, ringRadius, 0, 2 * Math.PI);
+          ctx.stroke();
+          ctx.restore();
+        } else {
+          // Normal dot: 50% + beam flicker
+          ctx.save();
+          ctx.globalAlpha = 0.5 + flicker;
+          ctx.fillStyle = d.color;
+          if (flicker > 0.1) {
+            ctx.shadowColor = d.color;
+            ctx.shadowBlur = 6 * flicker;
+          }
+          ctx.beginPath();
+          ctx.arc(d.x, d.y, 2, 0, 2 * Math.PI);
+          ctx.fill();
+          ctx.restore();
+        }
       }
 
       // After first frame, batch-load existing dots into feed
