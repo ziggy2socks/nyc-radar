@@ -198,18 +198,15 @@ export function RadarCanvas({ complaints, replayTime, dotLifetime, onPing, onBat
         const behind = (sweep - d.angle + 2 * Math.PI) % (2 * Math.PI);
         const beamOn = behind < 0.12;
 
-        // First beam pass: start highlight + fire feed ping together
+        // First beam pass: highlight + feed ping (synced)
         if (beamOn && !highlightRef.current.has(d.key)) {
           highlightRef.current.set(d.key, ts);
-          pingedRef.current.add(d.key);
           if (initialLoadDoneRef.current) {
             onPingRef.current(d.complaint);
+          } else {
+            // Still in initial load — mark for batch
+            pingedRef.current.add(d.key);
           }
-        }
-
-        // Track seen (for batch load logic, no feed fire here)
-        if (!pingedRef.current.has(d.key)) {
-          pingedRef.current.add(d.key);
         }
 
         // Beam flicker for all dots
@@ -262,18 +259,31 @@ export function RadarCanvas({ complaints, replayTime, dotLifetime, onPing, onBat
         }
       }
 
-      // After first frame, batch-load existing dots into feed
-      if (!initialLoadDoneRef.current && pingedRef.current.size > 0) {
-        initialLoadDoneRef.current = true;
-        // Collect all currently visible dots for initial feed (most recent first)
-        const batch: Complaint[] = [];
-        for (let i = dots.length - 1; i >= 0; i--) {
-          const d = dots[i];
-          if (d.createdMs > now || d.createdMs < windowStart) continue;
-          batch.push(d.complaint);
-          if (batch.length >= 50) break;
+      // After first frame, batch-load all currently visible dots into feed immediately
+      if (!initialLoadDoneRef.current) {
+        // Check if we have any visible dots
+        let hasVisible = false;
+        for (let i = 0; i < dots.length; i++) {
+          if (dots[i].createdMs <= now && dots[i].createdMs >= windowStart) { hasVisible = true; break; }
         }
-        onBatchLoadRef.current(batch);
+        if (hasVisible) {
+          initialLoadDoneRef.current = true;
+          // Mark all currently visible dots as already highlighted (no animation for pre-existing)
+          for (let i = 0; i < dots.length; i++) {
+            const d = dots[i];
+            if (d.createdMs > now || d.createdMs < windowStart) continue;
+            highlightRef.current.set(d.key, ts - 9999); // expired highlight = already settled
+          }
+          // Batch the feed
+          const batch: Complaint[] = [];
+          for (let i = dots.length - 1; i >= 0; i--) {
+            const d = dots[i];
+            if (d.createdMs > now || d.createdMs < windowStart) continue;
+            batch.push(d.complaint);
+            if (batch.length >= 50) break;
+          }
+          onBatchLoadRef.current(batch);
+        }
       }
 
       // Center dot
