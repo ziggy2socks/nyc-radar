@@ -10,6 +10,14 @@ export interface Complaint {
   longitude?: string;
   borough?: string;
   status?: string;
+  agency?: string;
+  agency_name?: string;
+  incident_address?: string;
+  intersection_street_1?: string;
+  intersection_street_2?: string;
+  incident_zip?: string;
+  resolution_description?: string;
+  community_board?: string;
 }
 
 // Distinct colors for top complaint types — spread across the full spectrum

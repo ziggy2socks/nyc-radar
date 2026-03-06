@@ -5,8 +5,7 @@ import type { Complaint } from './complaints';
 import './App.css';
 
 const MAX_FEED = 50;
-const DOT_LIFETIME_MS = 10 * 60 * 1000; // 10 minutes visible
-const SPEEDS = [1, 2, 4, 8, 16];
+const DOT_LIFETIME_MS = 10 * 60 * 1000;
 
 export default function App() {
   const [complaints, setComplaints] = useState<Complaint[]>([]);
@@ -15,37 +14,29 @@ export default function App() {
   const [feed, setFeed] = useState<Complaint[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [replayTime, setReplayTime] = useState<number>(0);
+  const [dataDate, setDataDate] = useState<string>('');
+  const [selectedDate, setSelectedDate] = useState('');
+  const [hoveredKey, setHoveredKey] = useState<string | null>(null);
+  const [selectedComplaint, setSelectedComplaint] = useState<Complaint | null>(null);
 
-  // Replay clock state
-  const [replayTime, setReplayTime] = useState<number>(0); // ms timestamp in "yesterday"
-  const [playing, setPlaying] = useState(true);
-  const [speedIdx, setSpeedIdx] = useState(0);
-  const [dataDate, setDataDate] = useState<string>(''); // "MAR 5" display string
-
-  // Refs for the animation tick
-  const playingRef = useRef(playing);
-  const speedRef = useRef(SPEEDS[0]);
   const replayRef = useRef(0);
   const lastTickRef = useRef(0);
-
-  playingRef.current = playing;
-  speedRef.current = SPEEDS[speedIdx];
-
-  const [selectedDate, setSelectedDate] = useState(''); // YYYY-MM-DD
+  const needsBatchRef = useRef(false);
 
   function initializeData(data: Complaint[], dateStr: string) {
-    const types = getTopComplaintTypes(data, 16);
+    const types = getTopComplaintTypes(data, 20);
     setComplaints(data);
     setTopTypes(types);
     setActiveTypes(new Set(types));
     setFeed([]);
+    setSelectedComplaint(null);
 
     const months = ['JAN','FEB','MAR','APR','MAY','JUN','JUL','AUG','SEP','OCT','NOV','DEC'];
     const d = new Date(dateStr + 'T12:00:00');
     setDataDate(`${months[d.getMonth()]} ${d.getDate()}`);
     setSelectedDate(dateStr);
 
-    // Initialize replay to current NYC time-of-day mapped to the data date
     const nycNow = new Date(new Date().toLocaleString('en-US', { timeZone: 'America/New_York' }));
     const nycMidnight = new Date(nycNow.getFullYear(), nycNow.getMonth(), nycNow.getDate()).getTime();
     const nycTimeOfDay = nycNow.getTime() - nycMidnight;
@@ -53,10 +44,8 @@ export default function App() {
     const startReplay = dataStart + nycTimeOfDay;
     setReplayTime(startReplay);
     replayRef.current = startReplay;
-    pingedRef.current.clear();
+    needsBatchRef.current = true; // signal RadarCanvas to batch load
   }
-
-  const pingedRef = useRef<Set<string>>(new Set());
 
   // Initial load
   useEffect(() => {
@@ -101,17 +90,16 @@ export default function App() {
     }
   };
 
-  // Replay clock tick — advance ref every frame, update React state every 500ms for display
+  // Replay clock — always 1× real time
   useEffect(() => {
     let raf: number;
     let lastDisplayUpdate = 0;
     function tick(ts: number) {
-      if (lastTickRef.current && playingRef.current) {
+      if (lastTickRef.current) {
         const dt = Math.min(ts - lastTickRef.current, 50);
-        replayRef.current += dt * speedRef.current;
+        replayRef.current += dt;
       }
       lastTickRef.current = ts;
-      // Update React display state every 500ms (not every frame)
       if (ts - lastDisplayUpdate > 500) {
         lastDisplayUpdate = ts;
         setReplayTime(replayRef.current);
@@ -122,19 +110,15 @@ export default function App() {
     return () => cancelAnimationFrame(raf);
   }, []);
 
-  // Filter by type only — RadarCanvas handles all time-based visibility
-  // Memoized so reference only changes when complaints or activeTypes change, NOT on every replayTime tick
   const filteredComplaints = useMemo(() =>
     complaints.filter(c => activeTypes.has(c.complaint_type)),
     [complaints, activeTypes]
   );
 
-  // Batch load: silently populate feed with existing dots on first render
   const handleBatchLoad = useCallback((batch: Complaint[]) => {
     setFeed(batch.slice(0, MAX_FEED));
   }, []);
 
-  // Individual ping: new dot appeared after initial load — add to top of feed
   const handlePing = useCallback((complaint: Complaint) => {
     setFeed(prev => {
       if (prev.length > 0 && prev[0].unique_key === complaint.unique_key) return prev;
@@ -155,24 +139,11 @@ export default function App() {
     else setActiveTypes(new Set(topTypes));
   };
 
-  const cycleSpeed = () => {
-    setSpeedIdx(prev => (prev + 1) % SPEEDS.length);
-  };
-
-  const skipBack = () => {
-    replayRef.current -= 15 * 60 * 1000; // -15 min
-    setReplayTime(replayRef.current);
-    setFeed([]);
-  };
-
-  const skipForward = () => {
-    replayRef.current += 15 * 60 * 1000; // +15 min
-    setReplayTime(replayRef.current);
-  };
-
-  // Format replay time as HH:MM:SS in ET
   const replayDate = new Date(replayTime);
-  const timeStr = replayDate.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false, timeZone: 'America/New_York' });
+  const timeStr = replayDate.toLocaleTimeString('en-US', {
+    hour: '2-digit', minute: '2-digit', second: '2-digit',
+    hour12: false, timeZone: 'America/New_York'
+  });
 
   return (
     <div className="app">
@@ -184,7 +155,7 @@ export default function App() {
           <div className="replay-info">
             <div className="replay-date-row">
               <button className="date-nav" onClick={() => switchDate(-1)}>◀</button>
-              <span className="replay-date">REPLAY: {dataDate}</span>
+              <span className="replay-date">{dataDate}</span>
               <button className="date-nav" onClick={() => switchDate(1)}>▶</button>
             </div>
             <div className="replay-time">{timeStr} ET</div>
@@ -193,18 +164,6 @@ export default function App() {
           <div className="meta">
             {loading ? 'LOADING…' : `${filteredComplaints.length.toLocaleString()} SIGNALS`}
           </div>
-        </div>
-
-        {/* Playback controls */}
-        <div className="playback">
-          <button className="pb-btn" onClick={skipBack} title="Back 15 min">⏪</button>
-          <button className="pb-btn pb-play" onClick={() => setPlaying(!playing)}>
-            {playing ? '⏸' : '▶'}
-          </button>
-          <button className="pb-btn" onClick={skipForward} title="Forward 15 min">⏩</button>
-          <button className="pb-btn pb-speed" onClick={cycleSpeed}>
-            {SPEEDS[speedIdx]}×
-          </button>
         </div>
 
         <div className="filter-section">
@@ -240,6 +199,7 @@ export default function App() {
           dotLifetime={DOT_LIFETIME_MS}
           onPing={handlePing}
           onBatchLoad={handleBatchLoad}
+          hoveredKey={hoveredKey}
         />
       </div>
 
@@ -251,18 +211,83 @@ export default function App() {
             <div className="feed-empty">Waiting for signals…</div>
           )}
           {feed.map((c) => (
-            <div key={c.unique_key} className="feed-item" style={{ '--item-color': getComplaintColor(c.complaint_type) } as React.CSSProperties}>
+            <div
+              key={c.unique_key}
+              className={`feed-item ${hoveredKey === c.unique_key ? 'feed-item--hover' : ''}`}
+              style={{ '--item-color': getComplaintColor(c.complaint_type) } as React.CSSProperties}
+              onMouseEnter={() => setHoveredKey(c.unique_key)}
+              onMouseLeave={() => setHoveredKey(null)}
+              onClick={() => setSelectedComplaint(selectedComplaint?.unique_key === c.unique_key ? null : c)}
+            >
               <span className="feed-dot" style={{ background: getComplaintColor(c.complaint_type) }} />
               <div className="feed-content">
                 <div className="feed-type">{c.complaint_type}</div>
                 {c.descriptor && <div className="feed-desc">{c.descriptor}</div>}
                 <div className="feed-meta">
-                  {c.borough} · {new Date(c.created_date).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })}
+                  {c.borough} · {new Date(c.created_date).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', timeZone: 'America/New_York' })}
                 </div>
               </div>
             </div>
           ))}
         </div>
+
+        {/* Detail popup */}
+        {selectedComplaint && (
+          <div className="detail-panel">
+            <div className="detail-header">
+              <span className="detail-title">SIGNAL DETAIL</span>
+              <button className="detail-close" onClick={() => setSelectedComplaint(null)}>✕</button>
+            </div>
+            <div className="detail-body">
+              <div className="detail-row">
+                <span className="detail-label">TYPE</span>
+                <span className="detail-value" style={{ color: getComplaintColor(selectedComplaint.complaint_type) }}>
+                  {selectedComplaint.complaint_type}
+                </span>
+              </div>
+              {selectedComplaint.descriptor && (
+                <div className="detail-row">
+                  <span className="detail-label">DESC</span>
+                  <span className="detail-value">{selectedComplaint.descriptor}</span>
+                </div>
+              )}
+              <div className="detail-row">
+                <span className="detail-label">BORO</span>
+                <span className="detail-value">{selectedComplaint.borough || '—'}</span>
+              </div>
+              <div className="detail-row">
+                <span className="detail-label">TIME</span>
+                <span className="detail-value">
+                  {new Date(selectedComplaint.created_date).toLocaleTimeString('en-US', {
+                    hour: 'numeric', minute: '2-digit', second: '2-digit', timeZone: 'America/New_York'
+                  })} ET
+                </span>
+              </div>
+              <div className="detail-row">
+                <span className="detail-label">STATUS</span>
+                <span className="detail-value">{(selectedComplaint as any).status || '—'}</span>
+              </div>
+              <div className="detail-row">
+                <span className="detail-label">AGENCY</span>
+                <span className="detail-value">{(selectedComplaint as any).agency_name || (selectedComplaint as any).agency || '—'}</span>
+              </div>
+              <div className="detail-row">
+                <span className="detail-label">ADDR</span>
+                <span className="detail-value">
+                  {(selectedComplaint as any).incident_address || (selectedComplaint as any).intersection_street_1 || '—'}
+                </span>
+              </div>
+              <div className="detail-row">
+                <span className="detail-label">ZIP</span>
+                <span className="detail-value">{(selectedComplaint as any).incident_zip || '—'}</span>
+              </div>
+              <div className="detail-row">
+                <span className="detail-label">ID</span>
+                <span className="detail-value detail-mono">{selectedComplaint.unique_key}</span>
+              </div>
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );

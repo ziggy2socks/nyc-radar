@@ -9,6 +9,7 @@ interface Props {
   dotLifetime: number;
   onPing: (complaint: Complaint) => void;
   onBatchLoad: (complaints: Complaint[]) => void;
+  hoveredKey: string | null;
 }
 
 const SIZE = 600;
@@ -75,7 +76,7 @@ function renderTrail(sweep: number) {
   }
 }
 
-export function RadarCanvas({ complaints, replayTime, dotLifetime, onPing, onBatchLoad }: Props) {
+export function RadarCanvas({ complaints, replayTime, dotLifetime, onPing, onBatchLoad, hoveredKey }: Props) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const rafRef = useRef(0);
   const angleRef = useRef(-Math.PI / 2);
@@ -89,11 +90,13 @@ export function RadarCanvas({ complaints, replayTime, dotLifetime, onPing, onBat
   const onPingRef = useRef(onPing);
   const onBatchLoadRef = useRef(onBatchLoad);
   const initialLoadDoneRef = useRef(false);
+  const hoveredKeyRef = useRef(hoveredKey);
 
   replayRef.current = replayTime;
   lifetimeRef.current = dotLifetime;
   onPingRef.current = onPing;
   onBatchLoadRef.current = onBatchLoad;
+  hoveredKeyRef.current = hoveredKey;
 
   // Pre-compute dot positions + angles
   useMemo(() => {
@@ -118,6 +121,7 @@ export function RadarCanvas({ complaints, replayTime, dotLifetime, onPing, onBat
     dotsRef.current = result;
     pingedRef.current.clear();
     highlightRef.current.clear();
+    initialLoadDoneRef.current = false; // reset for batch load on date switch
   }, [complaints]);
 
   useEffect(() => {
@@ -281,6 +285,65 @@ export function RadarCanvas({ complaints, replayTime, dotLifetime, onPing, onBat
             if (batch.length >= 50) break;
           }
           onBatchLoadRef.current(batch);
+        }
+      }
+
+      // ── Hovered dot — tactical bracket crosshairs ──
+      const hKey = hoveredKeyRef.current;
+      if (hKey) {
+        for (let i = 0; i < dots.length; i++) {
+          const d = dots[i];
+          if (d.key !== hKey) continue;
+          if (d.createdMs > now || d.createdMs < windowStart) break;
+
+          const s = 10; // bracket size
+          const g = 4;  // gap from center
+          const lw = 1;
+
+          ctx.save();
+          ctx.strokeStyle = 'rgba(255,255,255,0.8)';
+          ctx.lineWidth = lw;
+          ctx.shadowColor = '#fff';
+          ctx.shadowBlur = 4;
+
+          // Corner brackets: ┌ ┐ └ ┘
+          ctx.beginPath();
+          // Top-left
+          ctx.moveTo(d.x - g - s, d.y - g);
+          ctx.lineTo(d.x - g, d.y - g);
+          ctx.lineTo(d.x - g, d.y - g - s);
+          // Top-right
+          ctx.moveTo(d.x + g + s, d.y - g);
+          ctx.lineTo(d.x + g, d.y - g);
+          ctx.lineTo(d.x + g, d.y - g - s);
+          // Bottom-left
+          ctx.moveTo(d.x - g - s, d.y + g);
+          ctx.lineTo(d.x - g, d.y + g);
+          ctx.lineTo(d.x - g, d.y + g + s);
+          // Bottom-right
+          ctx.moveTo(d.x + g + s, d.y + g);
+          ctx.lineTo(d.x + g, d.y + g);
+          ctx.lineTo(d.x + g, d.y + g + s);
+          ctx.stroke();
+
+          // Thin crosshair lines extending outward
+          ctx.strokeStyle = 'rgba(255,255,255,0.25)';
+          ctx.shadowBlur = 0;
+          ctx.setLineDash([2, 4]);
+          ctx.beginPath();
+          ctx.moveTo(d.x - g - s - 2, d.y);
+          ctx.lineTo(d.x - g - s - 30, d.y);
+          ctx.moveTo(d.x + g + s + 2, d.y);
+          ctx.lineTo(d.x + g + s + 30, d.y);
+          ctx.moveTo(d.x, d.y - g - s - 2);
+          ctx.lineTo(d.x, d.y - g - s - 30);
+          ctx.moveTo(d.x, d.y + g + s + 2);
+          ctx.lineTo(d.x, d.y + g + s + 30);
+          ctx.stroke();
+          ctx.setLineDash([]);
+
+          ctx.restore();
+          break;
         }
       }
 

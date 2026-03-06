@@ -119,45 +119,6 @@ html, body, #root {
   margin-top: 4px;
 }
 
-/* ── Playback controls ── */
-.playback {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 4px;
-  padding: 10px 10px;
-  border-bottom: 1px solid var(--border);
-}
-
-.pb-btn {
-  font: 11px var(--font);
-  color: var(--text-muted);
-  background: none;
-  border: 1px solid var(--border);
-  padding: 4px 10px;
-  cursor: pointer;
-  transition: all 0.15s;
-  line-height: 1;
-}
-.pb-btn:hover {
-  color: var(--cyan);
-  border-color: var(--cyan);
-}
-
-.pb-play {
-  font-size: 13px;
-  padding: 4px 14px;
-  color: var(--cyan);
-  border-color: rgba(0, 200, 220, 0.3);
-}
-
-.pb-speed {
-  font-size: 9px;
-  letter-spacing: 1px;
-  min-width: 36px;
-  text-align: center;
-}
-
 /* ── Filters ── */
 .filter-section {
   flex: 1;
@@ -345,6 +306,89 @@ html, body, #root {
   color: var(--text-muted);
   margin-top: 2px;
   letter-spacing: 0.3px;
+}
+
+.feed-item--hover {
+  background: rgba(0, 200, 220, 0.08) !important;
+  border-left: 2px solid var(--item-color, var(--cyan));
+}
+
+.feed-item {
+  cursor: pointer;
+  border-left: 2px solid transparent;
+  transition: background 0.15s, border-color 0.15s;
+}
+
+.feed-item:hover {
+  background: rgba(0, 200, 220, 0.05);
+}
+
+/* ── Detail panel ── */
+.detail-panel {
+  border-top: 1px solid var(--border);
+  background: rgba(0, 10, 20, 0.95);
+  max-height: 50%;
+  overflow-y: auto;
+  scrollbar-width: thin;
+  scrollbar-color: var(--border) transparent;
+}
+
+.detail-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--border);
+}
+
+.detail-title {
+  font-size: 8px;
+  font-weight: 700;
+  letter-spacing: 2px;
+  color: var(--cyan);
+}
+
+.detail-close {
+  font: bold 11px var(--font);
+  color: var(--text-muted);
+  background: none;
+  border: none;
+  cursor: pointer;
+  padding: 2px 6px;
+  transition: color 0.15s;
+}
+.detail-close:hover { color: var(--text); }
+
+.detail-body {
+  padding: 8px 12px;
+}
+
+.detail-row {
+  display: flex;
+  gap: 8px;
+  padding: 4px 0;
+  border-bottom: 1px solid rgba(0, 180, 200, 0.05);
+}
+
+.detail-label {
+  font-size: 7px;
+  letter-spacing: 1.5px;
+  color: var(--text-muted);
+  min-width: 42px;
+  flex-shrink: 0;
+  padding-top: 1px;
+}
+
+.detail-value {
+  font-size: 9px;
+  color: var(--text);
+  word-break: break-word;
+}
+
+.detail-mono {
+  font-size: 8px;
+  letter-spacing: 0.5px;
+  color: var(--text-muted);
 }
 
 .error {
