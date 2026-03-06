@@ -194,21 +194,22 @@ export function RadarCanvas({ complaints, replayTime, dotLifetime, onPing, onBat
         if (d.createdMs > now) continue;
         if (d.createdMs < windowStart) continue;
 
-        // Track which dots have been seen (for feed)
-        if (!pingedRef.current.has(d.key)) {
+        // Beam proximity
+        const behind = (sweep - d.angle + 2 * Math.PI) % (2 * Math.PI);
+        const beamOn = behind < 0.12;
+
+        // First beam pass: start highlight + fire feed ping together
+        if (beamOn && !highlightRef.current.has(d.key)) {
+          highlightRef.current.set(d.key, ts);
           pingedRef.current.add(d.key);
           if (initialLoadDoneRef.current) {
             onPingRef.current(d.complaint);
           }
         }
 
-        // Beam proximity
-        const behind = (sweep - d.angle + 2 * Math.PI) % (2 * Math.PI);
-        const beamOn = behind < 0.12;
-
-        // First beam pass detection: beam touches dot → start highlight
-        if (beamOn && !highlightRef.current.has(d.key)) {
-          highlightRef.current.set(d.key, ts); // store the frame timestamp
+        // Track seen (for batch load logic, no feed fire here)
+        if (!pingedRef.current.has(d.key)) {
+          pingedRef.current.add(d.key);
         }
 
         // Beam flicker for all dots
