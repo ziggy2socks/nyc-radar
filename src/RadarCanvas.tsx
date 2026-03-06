@@ -98,6 +98,8 @@ export function RadarCanvas({ complaints, activeTypes, onPing, sweepAngleRef }: 
     const prevSweep = prevSweepRef.current;
     sweepAngleRef.current = (sweepAngleRef.current + SWEEP_SPEED * dt) % (2 * Math.PI);
     const sweep = sweepAngleRef.current;
+    // Clear swept set on each full rotation so dots ping again
+    if (sweep < prevSweep) sweptRef.current.clear();
     prevSweepRef.current = sweep;
 
     // ── Clear ──────────────────────────────────────────────
@@ -166,14 +168,23 @@ export function RadarCanvas({ complaints, activeTypes, onPing, sweepAngleRef }: 
     ctx.stroke();
     ctx.restore();
 
-    // ── Sweep detection — check dots in angular window ─────
+    // ── Draw dim background dots (always visible) ──────────
+    for (const dot of dots) {
+      ctx.save();
+      ctx.globalAlpha = 0.15;
+      ctx.fillStyle = dot.color;
+      ctx.beginPath();
+      ctx.arc(dot.x, dot.y, 1.5, 0, 2 * Math.PI);
+      ctx.fill();
+      ctx.restore();
+    }
+
+    // ── Sweep detection ────────────────────────────────────
     const now = timestamp;
-    const windowSize = SWEEP_SPEED * dt + 0.05; // swept arc this frame + small buffer
     for (const dot of dots) {
       if (sweptRef.current.has(dot.complaint.unique_key)) continue;
-      // Angular distance behind sweep
       const diff = (sweep - dot.angle + 2 * Math.PI) % (2 * Math.PI);
-      if (diff < windowSize) {
+      if (diff < 0.12) { // ~7° window
         sweptRef.current.add(dot.complaint.unique_key);
         pingsRef.current.push({ x: dot.x, y: dot.y, color: dot.color, born: now });
         onPing(dot.complaint);
