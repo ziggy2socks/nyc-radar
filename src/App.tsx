@@ -19,6 +19,7 @@ export default function App() {
   const [selectedDate, setSelectedDate] = useState('');
   const [hoveredKey, setHoveredKey] = useState<string | null>(null);
   const [expandedKey, setExpandedKey] = useState<string | null>(null);
+  const [mobilePanel, setMobilePanel] = useState<'none' | 'feed' | 'filters'>('none');
 
   const replayRef = useRef(0);
   const lastTickRef = useRef(0);
@@ -147,8 +148,24 @@ export default function App() {
 
   return (
     <div className="app">
-      {/* ── Left sidebar ── */}
-      <div className="sidebar">
+      {/* ── Mobile top bar ── */}
+      <div className="mobile-bar">
+        <div className="mobile-title">NYC 311 RADAR</div>
+        <div className="mobile-time">{timeStr} ET</div>
+        <div className="mobile-btns">
+          <button
+            className={`mobile-btn ${mobilePanel === 'filters' ? 'mobile-btn--active' : ''}`}
+            onClick={() => setMobilePanel(mobilePanel === 'filters' ? 'none' : 'filters')}
+          >☰</button>
+          <button
+            className={`mobile-btn ${mobilePanel === 'feed' ? 'mobile-btn--active' : ''}`}
+            onClick={() => setMobilePanel(mobilePanel === 'feed' ? 'none' : 'feed')}
+          >▤</button>
+        </div>
+      </div>
+
+      {/* ── Left sidebar (desktop) / overlay (mobile) ── */}
+      <div className={`sidebar ${mobilePanel === 'filters' ? 'sidebar--mobile-open' : ''}`}>
         <div className="sidebar-header">
           <div className="title">NYC 311 RADAR</div>
           <div className="subtitle">COMPLAINT SCANNER</div>
@@ -191,6 +208,11 @@ export default function App() {
         {error && <div className="error">{error}</div>}
       </div>
 
+      {/* Mobile backdrop */}
+      {mobilePanel !== 'none' && (
+        <div className="mobile-backdrop" onClick={() => setMobilePanel('none')} />
+      )}
+
       {/* ── Radar ── */}
       <div className="radar-wrap">
         <RadarCanvas
@@ -203,8 +225,8 @@ export default function App() {
         />
       </div>
 
-      {/* ── Right feed ── */}
-      <div className="feed-panel">
+      {/* ── Right feed (desktop) / bottom sheet (mobile) ── */}
+      <div className={`feed-panel ${mobilePanel === 'feed' ? 'feed--mobile-open' : ''}`}>
         <div className="feed-header">{dataDate || '—'} FEED</div>
         <div className="feed-list">
           {feed.length === 0 && (

@@ -362,3 +362,124 @@ html, body, #root {
   color: #ff4466;
   letter-spacing: 1px;
 }
+
+/* ── Mobile bar (hidden on desktop) ── */
+.mobile-bar {
+  display: none;
+}
+
+.mobile-backdrop {
+  display: none;
+}
+
+/* ── Mobile breakpoint ── */
+@media (max-width: 768px) {
+  .app {
+    flex-direction: column;
+    position: relative;
+  }
+
+  /* Mobile top bar */
+  .mobile-bar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 8px 12px;
+    background: var(--panel-bg);
+    border-bottom: 1px solid var(--border);
+    z-index: 100;
+    flex-shrink: 0;
+  }
+
+  .mobile-title {
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: 2px;
+    color: var(--cyan);
+  }
+
+  .mobile-time {
+    font-size: 10px;
+    color: var(--cyan);
+    font-weight: 700;
+    letter-spacing: 1px;
+    font-variant-numeric: tabular-nums;
+  }
+
+  .mobile-btns {
+    display: flex;
+    gap: 6px;
+  }
+
+  .mobile-btn {
+    font: bold 14px var(--font);
+    color: var(--text-muted);
+    background: none;
+    border: 1px solid var(--border);
+    padding: 4px 10px;
+    cursor: pointer;
+    line-height: 1;
+    transition: all 0.15s;
+  }
+  .mobile-btn--active {
+    color: var(--cyan);
+    border-color: var(--cyan);
+  }
+
+  .mobile-backdrop {
+    display: block;
+    position: fixed;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.5);
+    z-index: 199;
+  }
+
+  /* Radar fills remaining space */
+  .radar-wrap {
+    flex: 1;
+    min-height: 0;
+  }
+
+  .radar-canvas {
+    width: min(100vw, calc(100vh - 44px));
+    height: min(100vw, calc(100vh - 44px));
+  }
+
+  /* Sidebar — slide-in overlay from left */
+  .sidebar {
+    position: fixed;
+    top: 0;
+    left: 0;
+    bottom: 0;
+    width: 260px;
+    z-index: 200;
+    transform: translateX(-100%);
+    transition: transform 0.25s ease;
+    border-right: 1px solid var(--border);
+  }
+  .sidebar--mobile-open {
+    transform: translateX(0);
+  }
+
+  /* Feed — slide-up bottom sheet */
+  .feed-panel {
+    position: fixed;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    width: 100%;
+    max-height: 55vh;
+    z-index: 200;
+    transform: translateY(100%);
+    transition: transform 0.25s ease;
+    border-top: 1px solid var(--border);
+    border-left: none;
+    border-radius: 12px 12px 0 0;
+  }
+  .feed--mobile-open {
+    transform: translateY(0);
+  }
+
+  /* Hide sidebar header date/time on mobile (shown in mobile-bar instead) */
+  .replay-time { font-size: 14px; }
+}
