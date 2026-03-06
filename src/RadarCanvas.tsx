@@ -8,6 +8,7 @@ interface Props {
   replayTime: number;
   dotLifetime: number;
   onPing: (complaint: Complaint) => void;
+  onBatchLoad: (complaints: Complaint[]) => void;
 }
 
 const SIZE = 600;
@@ -74,7 +75,7 @@ function renderTrail(sweep: number) {
   }
 }
 
-export function RadarCanvas({ complaints, replayTime, dotLifetime, onPing }: Props) {
+export function RadarCanvas({ complaints, replayTime, dotLifetime, onPing, onBatchLoad }: Props) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const rafRef = useRef(0);
   const angleRef = useRef(-Math.PI / 2);
@@ -84,10 +85,13 @@ export function RadarCanvas({ complaints, replayTime, dotLifetime, onPing }: Pro
   const replayRef = useRef(replayTime);
   const lifetimeRef = useRef(dotLifetime);
   const onPingRef = useRef(onPing);
+  const onBatchLoadRef = useRef(onBatchLoad);
+  const initialLoadDoneRef = useRef(false);
 
   replayRef.current = replayTime;
   lifetimeRef.current = dotLifetime;
   onPingRef.current = onPing;
+  onBatchLoadRef.current = onBatchLoad;
 
   // Pre-compute dot positions + angles
   useMemo(() => {
@@ -185,10 +189,13 @@ export function RadarCanvas({ complaints, replayTime, dotLifetime, onPing }: Pro
         if (d.createdMs > now) continue;
         if (d.createdMs < windowStart) continue;
 
-        // Fire ping for feed
+        // Track which dots have been seen
         if (!pingedRef.current.has(d.key)) {
           pingedRef.current.add(d.key);
-          onPingRef.current(d.complaint);
+          // Only fire individual pings after initial batch
+          if (initialLoadDoneRef.current) {
+            onPingRef.current(d.complaint);
+          }
         }
 
         // Beam flicker: how close is the sweep line to this dot right now?
@@ -209,6 +216,20 @@ export function RadarCanvas({ complaints, replayTime, dotLifetime, onPing }: Pro
         ctx.arc(d.x, d.y, 2, 0, 2 * Math.PI);
         ctx.fill();
         ctx.restore();
+      }
+
+      // After first frame, batch-load existing dots into feed
+      if (!initialLoadDoneRef.current && pingedRef.current.size > 0) {
+        initialLoadDoneRef.current = true;
+        // Collect all currently visible dots for initial feed (most recent first)
+        const batch: Complaint[] = [];
+        for (let i = dots.length - 1; i >= 0; i--) {
+          const d = dots[i];
+          if (d.createdMs > now || d.createdMs < windowStart) continue;
+          batch.push(d.complaint);
+          if (batch.length >= 50) break;
+        }
+        onBatchLoadRef.current(batch);
       }
 
       // Center dot

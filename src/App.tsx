@@ -129,24 +129,17 @@ export default function App() {
     [complaints, activeTypes]
   );
 
-  // Queue pings and drip them into the feed one at a time
-  const pingQueueRef = useRef<Complaint[]>([]);
-
-  const handlePing = useCallback((complaint: Complaint) => {
-    pingQueueRef.current.push(complaint);
+  // Batch load: silently populate feed with existing dots on first render
+  const handleBatchLoad = useCallback((batch: Complaint[]) => {
+    setFeed(batch.slice(0, MAX_FEED));
   }, []);
 
-  // Drip feed: add one item every 150ms for smooth scrolling
-  useEffect(() => {
-    const interval = setInterval(() => {
-      if (pingQueueRef.current.length === 0) return;
-      const next = pingQueueRef.current.shift()!;
-      setFeed(prev => {
-        if (prev.length > 0 && prev[0].unique_key === next.unique_key) return prev;
-        return [next, ...prev].slice(0, MAX_FEED);
-      });
-    }, 150);
-    return () => clearInterval(interval);
+  // Individual ping: new dot appeared after initial load — add to top of feed
+  const handlePing = useCallback((complaint: Complaint) => {
+    setFeed(prev => {
+      if (prev.length > 0 && prev[0].unique_key === complaint.unique_key) return prev;
+      return [complaint, ...prev].slice(0, MAX_FEED);
+    });
   }, []);
 
   const toggleType = (type: string) => {
@@ -246,6 +239,7 @@ export default function App() {
           replayTime={replayTime}
           dotLifetime={DOT_LIFETIME_MS}
           onPing={handlePing}
+          onBatchLoad={handleBatchLoad}
         />
       </div>
 
