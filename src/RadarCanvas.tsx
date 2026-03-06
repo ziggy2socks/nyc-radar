@@ -1,4 +1,4 @@
-import { useEffect, useRef, useCallback } from 'react';
+import { useEffect, useRef, useCallback, useMemo } from 'react';
 import type { Complaint } from './complaints';
 import { getComplaintColor } from './complaints';
 import { makeProjection } from './coordinates';
@@ -11,22 +11,32 @@ interface Props {
 }
 
 const CANVAS_SIZE = 600;
-const SWEEP_SPEED = (2 * Math.PI) / 6000; // full rotation in 6 seconds
-const TRAIL_ANGLE = Math.PI / 2.5;
+const SWEEP_SPEED = (2 * Math.PI) / 7000; // full rotation in 7s
+const TRAIL_ANGLE = Math.PI / 2.2;
 const PING_FADE_MS = 5000;
 
-interface PingState {
+interface DotInfo {
   complaint: Complaint;
+  x: number;
+  y: number;
+  angle: number; // pre-computed angle from center (0–2π)
+  color: string;
+}
+
+interface PingState {
   x: number;
   y: number;
   color: string;
   born: number;
 }
 
-// Pre-project all borough paths once (loaded async)
+const cx = CANVAS_SIZE / 2;
+const cy = CANVAS_SIZE / 2;
+const R = CANVAS_SIZE / 2 - 2;
 const project = makeProjection(CANVAS_SIZE);
-let BOROUGH_PATHS: Path2D[] = [];
 
+// Borough paths — loaded once async
+let BOROUGH_PATHS: Path2D[] = [];
 fetch('/boroughs.geojson')
   .then(r => r.json())
   .then((geojson: any) => {
@@ -57,21 +67,38 @@ export function RadarCanvas({ complaints, activeTypes, onPing, sweepAngleRef }: 
   const rafRef = useRef<number | null>(null);
   const lastTimeRef = useRef<number>(0);
   const sweptRef = useRef<Set<string>>(new Set());
+  const prevSweepRef = useRef<number>(-Math.PI / 2);
 
-  const cx = CANVAS_SIZE / 2;
-  const cy = CANVAS_SIZE / 2;
-  const R = CANVAS_SIZE / 2 - 2;
+  // Pre-compute dot positions + angles once per complaints change — O(n) not O(n×frame)
+  const dots = useMemo<DotInfo[]>(() => {
+    const result: DotInfo[] = [];
+    for (const c of complaints) {
+      if (!activeTypes.has(c.complaint_type)) continue;
+      const lat = parseFloat(c.latitude ?? '');
+      const lon = parseFloat(c.longitude ?? '');
+      if (isNaN(lat) || isNaN(lon)) continue;
+      const { x, y } = project(lat, lon);
+      const dx = x - cx;
+      const dy = y - cy;
+      if (Math.sqrt(dx * dx + dy * dy) > R) continue;
+      const angle = (Math.atan2(dy, dx) + 2 * Math.PI) % (2 * Math.PI);
+      result.push({ complaint: c, x, y, angle, color: getComplaintColor(c.complaint_type) });
+    }
+    return result;
+  }, [complaints, activeTypes]);
 
   const draw = useCallback((timestamp: number) => {
     const canvas = canvasRef.current;
     if (!canvas) return;
     const ctx = canvas.getContext('2d')!;
 
-    const dt = lastTimeRef.current ? timestamp - lastTimeRef.current : 16;
+    const dt = lastTimeRef.current ? Math.min(timestamp - lastTimeRef.current, 50) : 16;
     lastTimeRef.current = timestamp;
 
+    const prevSweep = prevSweepRef.current;
     sweepAngleRef.current = (sweepAngleRef.current + SWEEP_SPEED * dt) % (2 * Math.PI);
     const sweep = sweepAngleRef.current;
+    prevSweepRef.current = sweep;
 
     // ── Clear ──────────────────────────────────────────────
     ctx.clearRect(0, 0, CANVAS_SIZE, CANVAS_SIZE);
@@ -88,7 +115,7 @@ export function RadarCanvas({ complaints, activeTypes, onPing, sweepAngleRef }: 
 
     // ── Grid rings ─────────────────────────────────────────
     ctx.strokeStyle = 'rgba(0, 180, 200, 0.1)';
-    ctx.lineWidth = 1;
+    ctx.lineWidth = 0.5;
     for (let r = R / 4; r <= R; r += R / 4) {
       ctx.beginPath();
       ctx.arc(cx, cy, r, 0, 2 * Math.PI);
@@ -96,8 +123,8 @@ export function RadarCanvas({ complaints, activeTypes, onPing, sweepAngleRef }: 
     }
 
     // ── Crosshairs ─────────────────────────────────────────
-    ctx.strokeStyle = 'rgba(0, 180, 200, 0.08)';
-    ctx.setLineDash([4, 8]);
+    ctx.strokeStyle = 'rgba(0, 180, 200, 0.07)';
+    ctx.setLineDash([3, 8]);
     ctx.beginPath();
     ctx.moveTo(cx - R, cy); ctx.lineTo(cx + R, cy);
     ctx.moveTo(cx, cy - R); ctx.lineTo(cx, cy + R);
@@ -105,26 +132,25 @@ export function RadarCanvas({ complaints, activeTypes, onPing, sweepAngleRef }: 
     ctx.setLineDash([]);
 
     // ── Borough fills ──────────────────────────────────────
-    ctx.fillStyle = 'rgba(0, 160, 190, 0.06)';
+    ctx.fillStyle = 'rgba(0, 160, 190, 0.05)';
     for (const path of BOROUGH_PATHS) ctx.fill(path);
 
     // ── Borough outlines ───────────────────────────────────
-    ctx.strokeStyle = 'rgba(0, 200, 220, 0.3)';
+    ctx.strokeStyle = 'rgba(0, 200, 220, 0.28)';
     ctx.lineWidth = 0.8;
     for (const path of BOROUGH_PATHS) ctx.stroke(path);
 
     // ── Sweep trail ────────────────────────────────────────
-    const trailStart = sweep - TRAIL_ANGLE;
     ctx.save();
     ctx.beginPath();
     ctx.moveTo(cx, cy);
-    ctx.arc(cx, cy, R, trailStart, sweep);
+    ctx.arc(cx, cy, R, sweep - TRAIL_ANGLE, sweep);
     ctx.closePath();
-    const sweepGrad = ctx.createRadialGradient(cx, cy, 0, cx, cy, R);
-    sweepGrad.addColorStop(0, 'rgba(0, 220, 255, 0.0)');
-    sweepGrad.addColorStop(0.5, 'rgba(0, 220, 255, 0.03)');
-    sweepGrad.addColorStop(1, 'rgba(0, 220, 255, 0.10)');
-    ctx.fillStyle = sweepGrad;
+    const grad = ctx.createRadialGradient(cx, cy, 0, cx, cy, R);
+    grad.addColorStop(0, 'rgba(0, 220, 255, 0.0)');
+    grad.addColorStop(0.6, 'rgba(0, 220, 255, 0.04)');
+    grad.addColorStop(1, 'rgba(0, 220, 255, 0.12)');
+    ctx.fillStyle = grad;
     ctx.fill();
     ctx.restore();
 
@@ -140,42 +166,31 @@ export function RadarCanvas({ complaints, activeTypes, onPing, sweepAngleRef }: 
     ctx.stroke();
     ctx.restore();
 
-    // ── Detect newly swept complaints ──────────────────────
+    // ── Sweep detection — check dots in angular window ─────
     const now = timestamp;
-    for (const c of complaints) {
-      if (!activeTypes.has(c.complaint_type)) continue;
-      if (sweptRef.current.has(c.unique_key)) continue;
-      const lat = parseFloat(c.latitude ?? '');
-      const lon = parseFloat(c.longitude ?? '');
-      if (isNaN(lat) || isNaN(lon)) continue;
-
-      const { x, y } = project(lat, lon);
-      const dx = x - cx;
-      const dy = y - cy;
-      if (Math.sqrt(dx * dx + dy * dy) > R) continue;
-
-      const dotAngle = (Math.atan2(dy, dx) + 2 * Math.PI) % (2 * Math.PI);
-      const sweepNorm = (sweep + 2 * Math.PI) % (2 * Math.PI);
-      const diff = (sweepNorm - dotAngle + 2 * Math.PI) % (2 * Math.PI);
-
-      if (diff < 0.08) {
-        sweptRef.current.add(c.unique_key);
-        pingsRef.current.push({ complaint: c, x, y, color: getComplaintColor(c.complaint_type), born: now });
-        onPing(c);
+    const windowSize = SWEEP_SPEED * dt + 0.05; // swept arc this frame + small buffer
+    for (const dot of dots) {
+      if (sweptRef.current.has(dot.complaint.unique_key)) continue;
+      // Angular distance behind sweep
+      const diff = (sweep - dot.angle + 2 * Math.PI) % (2 * Math.PI);
+      if (diff < windowSize) {
+        sweptRef.current.add(dot.complaint.unique_key);
+        pingsRef.current.push({ x: dot.x, y: dot.y, color: dot.color, born: now });
+        onPing(dot.complaint);
       }
     }
 
-    // ── Draw pings ─────────────────────────────────────────
+    // ── Draw fading pings ──────────────────────────────────
     pingsRef.current = pingsRef.current.filter(p => now - p.born < PING_FADE_MS);
     for (const ping of pingsRef.current) {
       const age = now - ping.born;
       const alpha = Math.max(0, 1 - age / PING_FADE_MS);
-      const r = 1.5 + (age / PING_FADE_MS) * 2.5;
+      const r = 1.5 + (age / PING_FADE_MS) * 3;
       ctx.save();
       ctx.globalAlpha = alpha;
       ctx.fillStyle = ping.color;
       ctx.shadowColor = ping.color;
-      ctx.shadowBlur = 8 * alpha;
+      ctx.shadowBlur = 10 * alpha;
       ctx.beginPath();
       ctx.arc(ping.x, ping.y, r, 0, 2 * Math.PI);
       ctx.fill();
@@ -204,16 +219,17 @@ export function RadarCanvas({ complaints, activeTypes, onPing, sweepAngleRef }: 
     ctx.restore();
 
     rafRef.current = requestAnimationFrame(draw);
-  }, [complaints, activeTypes, onPing, sweepAngleRef, cx, cy, R]);
+  }, [dots, onPing, sweepAngleRef]);
 
   useEffect(() => {
     sweepAngleRef.current = -Math.PI / 2;
-    sweptRef.current.clear();
+    prevSweepRef.current = -Math.PI / 2;
     pingsRef.current = [];
     rafRef.current = requestAnimationFrame(draw);
     return () => { if (rafRef.current) cancelAnimationFrame(rafRef.current); };
   }, [draw, sweepAngleRef]);
 
+  // Reset swept dots when data refreshes
   useEffect(() => { sweptRef.current.clear(); }, [complaints]);
 
   return (
