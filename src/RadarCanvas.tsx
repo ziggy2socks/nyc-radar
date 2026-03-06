@@ -8,7 +8,6 @@ interface Props {
   activeTypes: Set<string>;
   replayTime: number;
   dotLifetime: number;
-  newThreshold: number;
   onPing: (complaint: Complaint) => void;
 }
 

@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useRef } from 'react';
+import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import { RadarCanvas } from './RadarCanvas';
 import { fetchComplaints, fetchComplaintsForDate, getComplaintColor, getTopComplaintTypes } from './complaints';
 import type { Complaint } from './complaints';
@@ -101,31 +101,33 @@ export default function App() {
     }
   };
 
-  // Replay clock tick
+  // Replay clock tick — advance ref every frame, update React state every 500ms for display
   useEffect(() => {
     let raf: number;
+    let lastDisplayUpdate = 0;
     function tick(ts: number) {
       if (lastTickRef.current && playingRef.current) {
         const dt = Math.min(ts - lastTickRef.current, 50);
         replayRef.current += dt * speedRef.current;
-        setReplayTime(replayRef.current);
       }
       lastTickRef.current = ts;
+      // Update React display state every 500ms (not every frame)
+      if (ts - lastDisplayUpdate > 500) {
+        lastDisplayUpdate = ts;
+        setReplayTime(replayRef.current);
+      }
       raf = requestAnimationFrame(tick);
     }
     raf = requestAnimationFrame(tick);
     return () => cancelAnimationFrame(raf);
   }, []);
 
-  // Compute visible complaints based on replay time
-  const visibleComplaints = complaints.filter(c => {
-    if (!activeTypes.has(c.complaint_type)) return false;
-    const t = new Date(c.created_date).getTime();
-    return t <= replayRef.current && t > replayRef.current - DOT_LIFETIME_MS;
-  });
-
-  // Compute "new" complaints that just appeared (for radar ping effect)
-  const newThreshold = replayRef.current - 30000; // appeared in last 30s of replay time
+  // Filter by type only — RadarCanvas handles all time-based visibility
+  // Memoized so reference only changes when complaints or activeTypes change, NOT on every replayTime tick
+  const filteredComplaints = useMemo(() =>
+    complaints.filter(c => activeTypes.has(c.complaint_type)),
+    [complaints, activeTypes]
+  );
 
   // Queue pings and drip them into the feed one at a time
   const pingQueueRef = useRef<Complaint[]>([]);
@@ -196,7 +198,7 @@ export default function App() {
             <div className="replay-delay">24H DELAY</div>
           </div>
           <div className="meta">
-            {loading ? 'LOADING…' : `${visibleComplaints.length} ACTIVE · ${complaints.length.toLocaleString()} TOTAL`}
+            {loading ? 'LOADING…' : `${filteredComplaints.length.toLocaleString()} SIGNALS`}
           </div>
         </div>
 
@@ -240,11 +242,10 @@ export default function App() {
       {/* ── Radar ── */}
       <div className="radar-wrap">
         <RadarCanvas
-          complaints={visibleComplaints}
+          complaints={filteredComplaints}
           activeTypes={activeTypes}
           replayTime={replayTime}
           dotLifetime={DOT_LIFETIME_MS}
-          newThreshold={newThreshold}
           onPing={handlePing}
         />
       </div>
