@@ -288,7 +288,7 @@ export function RadarCanvas({ complaints, replayTime, dotLifetime, onPing, onBat
         }
       }
 
-      // ── Hovered dot — tactical bracket crosshairs ──
+      // ── Hovered/selected dot — thin corner brackets ──
       const hKey = hoveredKeyRef.current;
       if (hKey) {
         for (let i = 0; i < dots.length; i++) {
@@ -296,51 +296,32 @@ export function RadarCanvas({ complaints, replayTime, dotLifetime, onPing, onBat
           if (d.key !== hKey) continue;
           if (d.createdMs > now || d.createdMs < windowStart) break;
 
-          const s = 10; // bracket size
-          const g = 4;  // gap from center
-          const lw = 1;
+          const s = 5;  // bracket arm length
+          const g = 6;  // half-size of the square around dot
 
           ctx.save();
-          ctx.strokeStyle = 'rgba(255,255,255,0.8)';
-          ctx.lineWidth = lw;
-          ctx.shadowColor = '#fff';
-          ctx.shadowBlur = 4;
+          ctx.strokeStyle = 'rgba(255,255,255,0.55)';
+          ctx.lineWidth = 0.75;
 
-          // Corner brackets: ┌ ┐ └ ┘
+          // Corner brackets forming a square: ┌ ┐ └ ┘
           ctx.beginPath();
-          // Top-left
-          ctx.moveTo(d.x - g - s, d.y - g);
+          // Top-left ┌
+          ctx.moveTo(d.x - g, d.y - g + s);
           ctx.lineTo(d.x - g, d.y - g);
-          ctx.lineTo(d.x - g, d.y - g - s);
-          // Top-right
-          ctx.moveTo(d.x + g + s, d.y - g);
+          ctx.lineTo(d.x - g + s, d.y - g);
+          // Top-right ┐
+          ctx.moveTo(d.x + g - s, d.y - g);
           ctx.lineTo(d.x + g, d.y - g);
-          ctx.lineTo(d.x + g, d.y - g - s);
-          // Bottom-left
-          ctx.moveTo(d.x - g - s, d.y + g);
+          ctx.lineTo(d.x + g, d.y - g + s);
+          // Bottom-left └
+          ctx.moveTo(d.x - g, d.y + g - s);
           ctx.lineTo(d.x - g, d.y + g);
-          ctx.lineTo(d.x - g, d.y + g + s);
-          // Bottom-right
-          ctx.moveTo(d.x + g + s, d.y + g);
+          ctx.lineTo(d.x - g + s, d.y + g);
+          // Bottom-right ┘
+          ctx.moveTo(d.x + g - s, d.y + g);
           ctx.lineTo(d.x + g, d.y + g);
-          ctx.lineTo(d.x + g, d.y + g + s);
+          ctx.lineTo(d.x + g, d.y + g - s);
           ctx.stroke();
-
-          // Thin crosshair lines extending outward
-          ctx.strokeStyle = 'rgba(255,255,255,0.25)';
-          ctx.shadowBlur = 0;
-          ctx.setLineDash([2, 4]);
-          ctx.beginPath();
-          ctx.moveTo(d.x - g - s - 2, d.y);
-          ctx.lineTo(d.x - g - s - 30, d.y);
-          ctx.moveTo(d.x + g + s + 2, d.y);
-          ctx.lineTo(d.x + g + s + 30, d.y);
-          ctx.moveTo(d.x, d.y - g - s - 2);
-          ctx.lineTo(d.x, d.y - g - s - 30);
-          ctx.moveTo(d.x, d.y + g + s + 2);
-          ctx.lineTo(d.x, d.y + g + s + 30);
-          ctx.stroke();
-          ctx.setLineDash([]);
 
           ctx.restore();
           break;

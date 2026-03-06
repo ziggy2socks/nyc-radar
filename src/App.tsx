@@ -18,7 +18,7 @@ export default function App() {
   const [dataDate, setDataDate] = useState<string>('');
   const [selectedDate, setSelectedDate] = useState('');
   const [hoveredKey, setHoveredKey] = useState<string | null>(null);
-  const [selectedComplaint, setSelectedComplaint] = useState<Complaint | null>(null);
+  const [expandedKey, setExpandedKey] = useState<string | null>(null);
 
   const replayRef = useRef(0);
   const lastTickRef = useRef(0);
@@ -30,7 +30,7 @@ export default function App() {
     setTopTypes(types);
     setActiveTypes(new Set(types));
     setFeed([]);
-    setSelectedComplaint(null);
+    setExpandedKey(null);
 
     const months = ['JAN','FEB','MAR','APR','MAY','JUN','JUL','AUG','SEP','OCT','NOV','DEC'];
     const d = new Date(dateStr + 'T12:00:00');
@@ -199,7 +199,7 @@ export default function App() {
           dotLifetime={DOT_LIFETIME_MS}
           onPing={handlePing}
           onBatchLoad={handleBatchLoad}
-          hoveredKey={hoveredKey}
+          hoveredKey={hoveredKey || expandedKey}
         />
       </div>
 
@@ -210,84 +210,42 @@ export default function App() {
           {feed.length === 0 && (
             <div className="feed-empty">Waiting for signals…</div>
           )}
-          {feed.map((c) => (
-            <div
-              key={c.unique_key}
-              className={`feed-item ${hoveredKey === c.unique_key ? 'feed-item--hover' : ''}`}
-              style={{ '--item-color': getComplaintColor(c.complaint_type) } as React.CSSProperties}
-              onMouseEnter={() => setHoveredKey(c.unique_key)}
-              onMouseLeave={() => setHoveredKey(null)}
-              onClick={() => setSelectedComplaint(selectedComplaint?.unique_key === c.unique_key ? null : c)}
-            >
-              <span className="feed-dot" style={{ background: getComplaintColor(c.complaint_type) }} />
-              <div className="feed-content">
-                <div className="feed-type">{c.complaint_type}</div>
-                {c.descriptor && <div className="feed-desc">{c.descriptor}</div>}
-                <div className="feed-meta">
-                  {c.borough} · {new Date(c.created_date).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', timeZone: 'America/New_York' })}
+          {feed.map((c) => {
+            const isExpanded = expandedKey === c.unique_key;
+            return (
+              <div
+                key={c.unique_key}
+                className={`feed-item ${isExpanded ? 'feed-item--expanded' : ''}`}
+                style={{ '--item-color': getComplaintColor(c.complaint_type) } as React.CSSProperties}
+                onMouseEnter={() => setHoveredKey(c.unique_key)}
+                onMouseLeave={() => setHoveredKey(null)}
+                onClick={() => setExpandedKey(isExpanded ? null : c.unique_key)}
+              >
+                <span className="feed-dot" style={{ background: getComplaintColor(c.complaint_type) }} />
+                <div className="feed-content">
+                  <div className="feed-type">{c.complaint_type}</div>
+                  {c.descriptor && <div className="feed-desc">{c.descriptor}</div>}
+                  <div className="feed-meta">
+                    {c.borough} · {new Date(c.created_date).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', timeZone: 'America/New_York' })}
+                  </div>
+                  {isExpanded && (
+                    <div className="feed-detail">
+                      {c.agency_name && <div className="feed-detail-row"><span className="fd-label">AGENCY</span> {c.agency_name}</div>}
+                      {(c.incident_address || c.intersection_street_1) && (
+                        <div className="feed-detail-row"><span className="fd-label">ADDR</span> {c.incident_address || c.intersection_street_1}</div>
+                      )}
+                      {c.incident_zip && <div className="feed-detail-row"><span className="fd-label">ZIP</span> {c.incident_zip}</div>}
+                      {c.status && <div className="feed-detail-row"><span className="fd-label">STATUS</span> {c.status}</div>}
+                      {c.community_board && <div className="feed-detail-row"><span className="fd-label">CB</span> {c.community_board}</div>}
+                      <div className="feed-detail-row fd-id"><span className="fd-label">ID</span> {c.unique_key}</div>
+                    </div>
+                  )}
                 </div>
               </div>
-            </div>
-          ))}
+            );
+          })}
         </div>
 
-        {/* Detail popup */}
-        {selectedComplaint && (
-          <div className="detail-panel">
-            <div className="detail-header">
-              <span className="detail-title">SIGNAL DETAIL</span>
-              <button className="detail-close" onClick={() => setSelectedComplaint(null)}>✕</button>
-            </div>
-            <div className="detail-body">
-              <div className="detail-row">
-                <span className="detail-label">TYPE</span>
-                <span className="detail-value" style={{ color: getComplaintColor(selectedComplaint.complaint_type) }}>
-                  {selectedComplaint.complaint_type}
-                </span>
-              </div>
-              {selectedComplaint.descriptor && (
-                <div className="detail-row">
-                  <span className="detail-label">DESC</span>
-                  <span className="detail-value">{selectedComplaint.descriptor}</span>
-                </div>
-              )}
-              <div className="detail-row">
-                <span className="detail-label">BORO</span>
-                <span className="detail-value">{selectedComplaint.borough || '—'}</span>
-              </div>
-              <div className="detail-row">
-                <span className="detail-label">TIME</span>
-                <span className="detail-value">
-                  {new Date(selectedComplaint.created_date).toLocaleTimeString('en-US', {
-                    hour: 'numeric', minute: '2-digit', second: '2-digit', timeZone: 'America/New_York'
-                  })} ET
-                </span>
-              </div>
-              <div className="detail-row">
-                <span className="detail-label">STATUS</span>
-                <span className="detail-value">{(selectedComplaint as any).status || '—'}</span>
-              </div>
-              <div className="detail-row">
-                <span className="detail-label">AGENCY</span>
-                <span className="detail-value">{(selectedComplaint as any).agency_name || (selectedComplaint as any).agency || '—'}</span>
-              </div>
-              <div className="detail-row">
-                <span className="detail-label">ADDR</span>
-                <span className="detail-value">
-                  {(selectedComplaint as any).incident_address || (selectedComplaint as any).intersection_street_1 || '—'}
-                </span>
-              </div>
-              <div className="detail-row">
-                <span className="detail-label">ZIP</span>
-                <span className="detail-value">{(selectedComplaint as any).incident_zip || '—'}</span>
-              </div>
-              <div className="detail-row">
-                <span className="detail-label">ID</span>
-                <span className="detail-value detail-mono">{selectedComplaint.unique_key}</span>
-              </div>
-            </div>
-          </div>
-        )}
       </div>
     </div>
   );

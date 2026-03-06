@@ -323,72 +323,37 @@ html, body, #root {
   background: rgba(0, 200, 220, 0.05);
 }
 
-/* ── Detail panel ── */
-.detail-panel {
-  border-top: 1px solid var(--border);
-  background: rgba(0, 10, 20, 0.95);
-  max-height: 50%;
-  overflow-y: auto;
-  scrollbar-width: thin;
-  scrollbar-color: var(--border) transparent;
+/* ── Inline feed detail (expanded) ── */
+.feed-item--expanded {
+  background: rgba(0, 200, 220, 0.06);
+  border-left: 2px solid var(--item-color, var(--cyan));
 }
 
-.detail-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  padding: 10px 12px;
-  border-bottom: 1px solid var(--border);
+.feed-detail {
+  margin-top: 6px;
+  padding-top: 6px;
+  border-top: 1px solid rgba(0, 180, 200, 0.1);
 }
 
-.detail-title {
+.feed-detail-row {
   font-size: 8px;
-  font-weight: 700;
-  letter-spacing: 2px;
-  color: var(--cyan);
-}
-
-.detail-close {
-  font: bold 11px var(--font);
   color: var(--text-muted);
-  background: none;
-  border: none;
-  cursor: pointer;
-  padding: 2px 6px;
-  transition: color 0.15s;
-}
-.detail-close:hover { color: var(--text); }
-
-.detail-body {
-  padding: 8px 12px;
+  padding: 2px 0;
+  line-height: 1.4;
 }
 
-.detail-row {
-  display: flex;
-  gap: 8px;
-  padding: 4px 0;
-  border-bottom: 1px solid rgba(0, 180, 200, 0.05);
-}
-
-.detail-label {
+.fd-label {
   font-size: 7px;
-  letter-spacing: 1.5px;
-  color: var(--text-muted);
-  min-width: 42px;
-  flex-shrink: 0;
-  padding-top: 1px;
+  letter-spacing: 1px;
+  color: rgba(0, 180, 200, 0.4);
+  margin-right: 6px;
 }
 
-.detail-value {
-  font-size: 9px;
-  color: var(--text);
-  word-break: break-word;
-}
-
-.detail-mono {
-  font-size: 8px;
+.fd-id {
+  margin-top: 3px;
+  font-size: 7px;
   letter-spacing: 0.5px;
-  color: var(--text-muted);
+  color: rgba(0, 180, 200, 0.25);
 }
 
 .error {
