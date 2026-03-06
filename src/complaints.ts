@@ -49,15 +49,21 @@ export function getComplaintColor(type: string): string {
 }
 
 export async function fetchComplaints(): Promise<Complaint[]> {
-  const since = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
-  const query = [
-    `$where=created_date >= '${since}' AND latitude IS NOT NULL AND longitude IS NOT NULL`,
-    `$order=created_date DESC`,
-    `$limit=2000`,
-  ].map(p => p.replace(/ /g, '+')).join('&');
+  const since = new Date(Date.now() - 24 * 60 * 60 * 1000)
+    .toISOString()
+    .replace('T', ' ')
+    .replace(/\..+$/, '');  // "2026-03-05 06:00:00"
 
-  const res = await fetch(`/api/311?${query}`, { cache: 'no-store' });
-  if (!res.ok) throw new Error(`311 API error: ${res.status}`);
+  const params = new URLSearchParams();
+  params.set('$where', `created_date >= '${since}' AND latitude IS NOT NULL AND longitude IS NOT NULL`);
+  params.set('$order', 'created_date DESC');
+  params.set('$limit', '2000');
+
+  const res = await fetch(`/api/311?${params.toString()}`, { cache: 'no-store' });
+  if (!res.ok) {
+    const txt = await res.text();
+    throw new Error(`311 API error: ${res.status} — ${txt.slice(0, 100)}`);
+  }
   return res.json();
 }
 
