@@ -243,7 +243,6 @@ export default function App() {
       <div className="radar-wrap">
         <RadarCanvas
           complaints={filteredComplaints}
-          activeTypes={activeTypes}
           replayTime={replayTime}
           dotLifetime={DOT_LIFETIME_MS}
           onPing={handlePing}
