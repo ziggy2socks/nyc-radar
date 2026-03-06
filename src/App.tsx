@@ -5,7 +5,7 @@ import type { Complaint } from './complaints';
 import './App.css';
 
 const MAX_FEED = 50;
-const DOT_LIFETIME_MS = 60 * 60 * 1000; // 1 hour visible
+const DOT_LIFETIME_MS = 10 * 60 * 1000; // 10 minutes visible
 const SPEEDS = [1, 2, 4, 8, 16];
 
 export default function App() {

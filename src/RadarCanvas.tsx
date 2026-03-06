@@ -280,50 +280,85 @@ export function RadarCanvas({ complaints, replayTime, dotLifetime, onPing }: Pro
       ctx.restore();
 
       // ── Draw active (discovered) dots ───────────────
+      // Lifecycle:
+      //   0–2s:    "flash" phase — 100% bright, 2x size, ring burst
+      //   2s–3s:   settle — shrink to 1x, drop to 50% brightness
+      //   3s+:     fade — 50% → 0% linearly over `lifetime` ms, then gone
+      //   beam re-pass: +10% brightness bump (brief)
+
+      const FLASH_MS = 2000;   // full bright discovery
+      const SETTLE_MS = 1000;  // transition to settled state
+      const BASE_SIZE = 2;     // settled dot radius
+
       for (const [, ad] of activeRef.current) {
         const d = ad.dot;
-        const age = now - ad.discoveredAt; // time since beam found it
-        const freshness = 1 - age / lifetime;
-        const isNew = age < 120000; // first 2 min = highlight phase
+        const age = now - ad.discoveredAt;
 
-        // Beam proximity for re-illumination on subsequent passes
+        // Beam re-pass brightness bump
         const behind = (sweep - d.angle + 2 * Math.PI) % (2 * Math.PI);
-        const inBeam = behind < TRAIL_ARC;
-        const beamBright = inBeam ? Math.pow(1 - behind / TRAIL_ARC, 3) : 0;
+        const beamBump = behind < 0.2 ? 0.10 * (1 - behind / 0.2) : 0; // +10% when beam is right on it
+
+        let alpha: number;
+        let radius: number;
+        let glowBlur = 0;
+        let ringBurst = false;
+        let ringAlpha = 0;
+        let ringRadius = 0;
+
+        if (age < FLASH_MS) {
+          // Flash phase: 100% bright, 2x size
+          const t = age / FLASH_MS;
+          alpha = 1.0;
+          radius = BASE_SIZE * 2;
+          glowBlur = 18 * (1 - t);
+          // Ring burst in first 500ms
+          if (age < 500) {
+            ringBurst = true;
+            ringAlpha = 1 - (age / 500);
+            ringRadius = 6 + (age / 500) * 20;
+          }
+        } else if (age < FLASH_MS + SETTLE_MS) {
+          // Settle phase: shrink 2x→1x, brightness 100%→50%
+          const t = (age - FLASH_MS) / SETTLE_MS;
+          alpha = 1.0 - 0.5 * t; // 1.0 → 0.5
+          radius = BASE_SIZE * (2 - t); // 2x → 1x
+          glowBlur = 4 * (1 - t);
+        } else {
+          // Fade phase: 50% → 0% over lifetime
+          const fadeAge = age - FLASH_MS - SETTLE_MS;
+          const fadeTotal = lifetime - FLASH_MS - SETTLE_MS;
+          const fadeFrac = Math.min(fadeAge / fadeTotal, 1);
+          alpha = 0.5 * (1 - fadeFrac); // 0.5 → 0.0
+          radius = BASE_SIZE;
+          glowBlur = 0;
+        }
+
+        // Add beam re-pass bump
+        alpha = Math.min(alpha + beamBump, 1.0);
+        if (beamBump > 0.02) {
+          glowBlur = Math.max(glowBlur, 4 * (beamBump / 0.10));
+        }
+
+        if (alpha < 0.005) continue; // invisible, skip draw
 
         ctx.save();
-        if (isNew) {
-          // Newly discovered — bright with glow
-          const phase = age / 120000;
-          const glow = 1 - phase;
-          ctx.globalAlpha = 0.4 + 0.6 * glow;
-          ctx.fillStyle = d.color;
+        ctx.globalAlpha = alpha;
+        ctx.fillStyle = d.color;
+        if (glowBlur > 0) {
           ctx.shadowColor = d.color;
-          ctx.shadowBlur = 18 * glow;
+          ctx.shadowBlur = glowBlur;
+        }
+        ctx.beginPath();
+        ctx.arc(d.x, d.y, radius, 0, 2 * Math.PI);
+        ctx.fill();
+
+        if (ringBurst) {
+          ctx.globalAlpha = ringAlpha;
+          ctx.strokeStyle = d.color;
+          ctx.lineWidth = 1;
           ctx.beginPath();
-          ctx.arc(d.x, d.y, 2 + 4 * glow, 0, 2 * Math.PI);
-          ctx.fill();
-          // Ring burst in first 0.5s
-          if (glow > 0.85) {
-            ctx.strokeStyle = d.color;
-            ctx.globalAlpha = (glow - 0.85) * 6;
-            ctx.lineWidth = 1;
-            ctx.beginPath();
-            ctx.arc(d.x, d.y, 6 + (1 - glow) * 30, 0, 2 * Math.PI);
-            ctx.stroke();
-          }
-        } else {
-          // Settled dot — dim, lights up when beam re-passes
-          const alpha = 0.03 + beamBright * 0.4 + freshness * 0.08;
-          ctx.globalAlpha = Math.min(alpha, 0.85);
-          ctx.fillStyle = d.color;
-          if (beamBright > 0.2) {
-            ctx.shadowColor = d.color;
-            ctx.shadowBlur = 5 * beamBright;
-          }
-          ctx.beginPath();
-          ctx.arc(d.x, d.y, 1.2 + freshness * 0.8 + beamBright * 1.2, 0, 2 * Math.PI);
-          ctx.fill();
+          ctx.arc(d.x, d.y, ringRadius, 0, 2 * Math.PI);
+          ctx.stroke();
         }
         ctx.restore();
       }
