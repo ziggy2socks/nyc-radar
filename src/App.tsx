@@ -152,16 +152,10 @@ export default function App() {
       <div className="mobile-bar">
         <div className="mobile-title">NYC 311 RADAR</div>
         <div className="mobile-time">{timeStr} ET</div>
-        <div className="mobile-btns">
-          <button
-            className={`mobile-btn ${mobilePanel === 'filters' ? 'mobile-btn--active' : ''}`}
-            onClick={() => setMobilePanel(mobilePanel === 'filters' ? 'none' : 'filters')}
-          >☰</button>
-          <button
-            className={`mobile-btn ${mobilePanel === 'feed' ? 'mobile-btn--active' : ''}`}
-            onClick={() => setMobilePanel(mobilePanel === 'feed' ? 'none' : 'feed')}
-          >▤</button>
-        </div>
+        <button
+          className={`mobile-btn ${mobilePanel === 'filters' ? 'mobile-btn--active' : ''}`}
+          onClick={() => setMobilePanel(mobilePanel === 'filters' ? 'none' : 'filters')}
+        >☰</button>
       </div>
 
       {/* ── Left sidebar (desktop) / overlay (mobile) ── */}
@@ -225,8 +219,8 @@ export default function App() {
         />
       </div>
 
-      {/* ── Right feed (desktop) / bottom sheet (mobile) ── */}
-      <div className={`feed-panel ${mobilePanel === 'feed' ? 'feed--mobile-open' : ''}`}>
+      {/* ── Right feed (desktop) / persistent mini-feed (mobile) ── */}
+      <div className="feed-panel">
         <div className="feed-header">{dataDate || '—'} FEED</div>
         <div className="feed-list">
           {feed.length === 0 && (
