@@ -51,12 +51,13 @@ export default function App() {
         const months = ['JAN','FEB','MAR','APR','MAY','JUN','JUL','AUG','SEP','OCT','NOV','DEC'];
         setDataDate(`${months[firstDate.getMonth()]} ${firstDate.getDate()}`);
 
-        // Initialize replay to current time-of-day mapped to yesterday
-        const now = new Date();
-        const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
-        const timeOfDay = now.getTime() - todayStart; // ms since midnight
+        // Initialize replay to current NYC time-of-day mapped to yesterday
+        // Get current time in America/New_York
+        const nycNow = new Date(new Date().toLocaleString('en-US', { timeZone: 'America/New_York' }));
+        const nycMidnight = new Date(nycNow.getFullYear(), nycNow.getMonth(), nycNow.getDate()).getTime();
+        const nycTimeOfDay = nycNow.getTime() - nycMidnight; // ms since midnight ET
         const yesterdayStart = new Date(firstDate.getFullYear(), firstDate.getMonth(), firstDate.getDate()).getTime();
-        const startReplay = yesterdayStart + timeOfDay;
+        const startReplay = yesterdayStart + nycTimeOfDay;
         setReplayTime(startReplay);
         replayRef.current = startReplay;
       } catch (e) {
@@ -130,9 +131,9 @@ export default function App() {
     setReplayTime(replayRef.current);
   };
 
-  // Format replay time as HH:MM:SS
+  // Format replay time as HH:MM:SS in ET
   const replayDate = new Date(replayTime);
-  const timeStr = replayDate.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false });
+  const timeStr = replayDate.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false, timeZone: 'America/New_York' });
 
   return (
     <div className="app">
