@@ -256,8 +256,8 @@ export default function App() {
           {feed.length === 0 && (
             <div className="feed-empty">Waiting for signals…</div>
           )}
-          {feed.map((c, i) => (
-            <div key={`${c.unique_key}-${i}`} className="feed-item" style={{ '--item-color': getComplaintColor(c.complaint_type) } as React.CSSProperties}>
+          {feed.map((c) => (
+            <div key={c.unique_key} className="feed-item" style={{ '--item-color': getComplaintColor(c.complaint_type) } as React.CSSProperties}>
               <span className="feed-dot" style={{ background: getComplaintColor(c.complaint_type) }} />
               <div className="feed-content">
                 <div className="feed-type">{c.complaint_type}</div>

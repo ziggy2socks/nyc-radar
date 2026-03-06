@@ -16,15 +16,16 @@ const SIZE = 600;
 const R = SIZE / 2 - 2;
 const CX = SIZE / 2;
 const CY = SIZE / 2;
-const SWEEP_SPEED = (2 * Math.PI) / 7000; // 7s per rotation
-const TRAIL_ARC = Math.PI * 1.2; // ~216° trailing visibility gradient
+const SWEEP_SPEED = (2 * Math.PI) / 7000;
+const TRAIL_ARC = Math.PI * 1.4; // ~252° trailing glow
 
 interface DotInfo {
   key: string;
   complaint: Complaint;
   x: number;
   y: number;
-  angle: number; // from center
+  angle: number;
+  dist: number; // distance from center (for range readout)
   color: string;
   createdMs: number;
 }
@@ -53,6 +54,35 @@ fetch('/boroughs.geojson')
   })
   .catch(console.error);
 
+// Pre-render the sweep trail as an offscreen canvas (smooth gradient, no stepping)
+const trailCanvas = document.createElement('canvas');
+trailCanvas.width = SIZE;
+trailCanvas.height = SIZE;
+
+function renderTrail(sweep: number) {
+  const tctx = trailCanvas.getContext('2d')!;
+  tctx.clearRect(0, 0, SIZE, SIZE);
+
+  // Draw 60 thin slices for smooth conical gradient
+  const slices = 60;
+  const sliceArc = TRAIL_ARC / slices;
+  for (let s = 0; s < slices; s++) {
+    const frac = s / slices; // 0=leading, 1=tail
+    const alpha = Math.pow(1 - frac, 3) * 0.14; // cubic falloff
+    if (alpha < 0.002) continue;
+
+    const a0 = sweep - sliceArc * (s + 1);
+    const a1 = sweep - sliceArc * s;
+
+    tctx.beginPath();
+    tctx.moveTo(CX, CY);
+    tctx.arc(CX, CY, R, a0, a1);
+    tctx.closePath();
+    tctx.fillStyle = `rgba(0,220,255,${alpha})`;
+    tctx.fill();
+  }
+}
+
 export function RadarCanvas({ complaints, replayTime, dotLifetime, onPing }: Props) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const angleRef = useRef(-Math.PI / 2);
@@ -62,12 +92,12 @@ export function RadarCanvas({ complaints, replayTime, dotLifetime, onPing }: Pro
   const dotLifeRef = useRef(dotLifetime);
   const onPingRef = useRef(onPing);
   const pingedRef = useRef<Set<string>>(new Set());
+  const frameCount = useRef(0);
 
   replayRef.current = replayTime;
   dotLifeRef.current = dotLifetime;
   onPingRef.current = onPing;
 
-  // Pre-compute dot positions + angles
   useMemo(() => {
     const result: DotInfo[] = [];
     for (const c of complaints) {
@@ -77,11 +107,12 @@ export function RadarCanvas({ complaints, replayTime, dotLifetime, onPing }: Pro
       const { x, y } = project(lat, lon);
       const dx = x - CX;
       const dy = y - CY;
-      if (dx * dx + dy * dy > R * R) continue;
+      const dist = Math.sqrt(dx * dx + dy * dy);
+      if (dist > R) continue;
       const angle = (Math.atan2(dy, dx) + 2 * Math.PI) % (2 * Math.PI);
       result.push({
         key: c.unique_key, complaint: c,
-        x, y, angle,
+        x, y, angle, dist,
         color: getComplaintColor(c.complaint_type),
         createdMs: new Date(c.created_date).getTime(),
       });
@@ -103,6 +134,7 @@ export function RadarCanvas({ complaints, replayTime, dotLifetime, onPing }: Pro
       const sweep = angleRef.current;
       const now = replayRef.current;
       const lifetime = dotLifeRef.current;
+      frameCount.current++;
 
       ctx.clearRect(0, 0, SIZE, SIZE);
       ctx.save();
@@ -110,60 +142,90 @@ export function RadarCanvas({ complaints, replayTime, dotLifetime, onPing }: Pro
       ctx.arc(CX, CY, R, 0, 2 * Math.PI);
       ctx.clip();
 
-      // ── Deep dark background ─────────────────────────
-      ctx.fillStyle = '#010509';
+      // ── Background — very dark ──────────────────────
+      ctx.fillStyle = '#010408';
       ctx.fillRect(0, 0, SIZE, SIZE);
 
-      // ── Borough outlines — very dim, just structure ──
-      ctx.strokeStyle = 'rgba(0,200,220,0.08)';
-      ctx.lineWidth = 0.6;
-      for (const p of boroughPaths) ctx.stroke(p);
+      // ── Subtle scan lines (CRT effect) ──────────────
+      ctx.save();
+      ctx.globalAlpha = 0.03;
+      for (let y = 0; y < SIZE; y += 3) {
+        ctx.fillStyle = '#000';
+        ctx.fillRect(0, y, SIZE, 1);
+      }
+      ctx.restore();
 
-      // ── Grid rings — barely visible ──────────────────
-      ctx.strokeStyle = 'rgba(0,180,200,0.05)';
+      // ── Grid rings with range labels ────────────────
+      ctx.strokeStyle = 'rgba(0,180,200,0.06)';
       ctx.lineWidth = 0.5;
-      for (let r = R / 4; r <= R; r += R / 4) {
+      ctx.font = '7px JetBrains Mono, monospace';
+      ctx.fillStyle = 'rgba(0,180,200,0.15)';
+      const rangeLabels = ['5 MI', '10 MI', '15 MI', '20 MI'];
+      for (let i = 1; i <= 4; i++) {
+        const r = (R / 4) * i;
         ctx.beginPath();
         ctx.arc(CX, CY, r, 0, 2 * Math.PI);
         ctx.stroke();
+        // Label at top of each ring
+        ctx.fillText(rangeLabels[i - 1], CX + 3, CY - r + 10);
       }
 
-      // ── Crosshairs ───────────────────────────────────
+      // ── Bearing marks around outer ring ─────────────
+      ctx.save();
+      ctx.font = '7px JetBrains Mono, monospace';
+      ctx.fillStyle = 'rgba(0,180,200,0.2)';
+      ctx.textAlign = 'center';
+      const bearings = [
+        { deg: 0, label: 'E' }, { deg: 90, label: 'S' },
+        { deg: 180, label: 'W' }, { deg: 270, label: 'N' },
+      ];
+      for (const b of bearings) {
+        const rad = (b.deg * Math.PI) / 180;
+        const lx = CX + Math.cos(rad) * (R - 14);
+        const ly = CY + Math.sin(rad) * (R - 14) + 3;
+        ctx.fillText(b.label, lx, ly);
+      }
+      // Tick marks every 30°
+      ctx.strokeStyle = 'rgba(0,180,200,0.1)';
+      ctx.lineWidth = 1;
+      for (let deg = 0; deg < 360; deg += 30) {
+        const rad = (deg * Math.PI) / 180;
+        ctx.beginPath();
+        ctx.moveTo(CX + Math.cos(rad) * (R - 6), CY + Math.sin(rad) * (R - 6));
+        ctx.lineTo(CX + Math.cos(rad) * R, CY + Math.sin(rad) * R);
+        ctx.stroke();
+      }
+      // Minor ticks every 10°
+      ctx.strokeStyle = 'rgba(0,180,200,0.05)';
+      for (let deg = 0; deg < 360; deg += 10) {
+        if (deg % 30 === 0) continue;
+        const rad = (deg * Math.PI) / 180;
+        ctx.beginPath();
+        ctx.moveTo(CX + Math.cos(rad) * (R - 3), CY + Math.sin(rad) * (R - 3));
+        ctx.lineTo(CX + Math.cos(rad) * R, CY + Math.sin(rad) * R);
+        ctx.stroke();
+      }
+      ctx.restore();
+
+      // ── Crosshairs ──────────────────────────────────
       ctx.strokeStyle = 'rgba(0,180,200,0.04)';
-      ctx.setLineDash([3, 10]);
+      ctx.setLineDash([2, 8]);
       ctx.beginPath();
       ctx.moveTo(CX - R, CY); ctx.lineTo(CX + R, CY);
       ctx.moveTo(CX, CY - R); ctx.lineTo(CX, CY + R);
       ctx.stroke();
       ctx.setLineDash([]);
 
-      // ── Sweep beam — the "light source" ──────────────
-      // Wide trailing glow that illuminates the area behind the beam
-      ctx.save();
-      ctx.beginPath();
-      ctx.moveTo(CX, CY);
-      ctx.arc(CX, CY, R, sweep - TRAIL_ARC, sweep);
-      ctx.closePath();
+      // ── Borough outlines — very dim ─────────────────
+      ctx.strokeStyle = 'rgba(0,200,220,0.06)';
+      ctx.lineWidth = 0.5;
+      for (const p of boroughPaths) ctx.stroke(p);
 
-      // Conical gradient — brightest at leading edge, fades to black
-      // We approximate with multiple arc fills at decreasing opacity
-      const steps = 12;
-      for (let s = 0; s < steps; s++) {
-        const frac = s / steps; // 0 = leading edge, 1 = tail
-        const a0 = sweep - TRAIL_ARC * frac - TRAIL_ARC / steps;
-        const a1 = sweep - TRAIL_ARC * frac;
-        const alpha = (1 - frac) * (1 - frac) * 0.12; // quadratic falloff
+      // ── Sweep trail — smooth via offscreen canvas ───
+      renderTrail(sweep);
+      ctx.drawImage(trailCanvas, 0, 0);
 
-        ctx.beginPath();
-        ctx.moveTo(CX, CY);
-        ctx.arc(CX, CY, R, a0, a1);
-        ctx.closePath();
-        ctx.fillStyle = `rgba(0,220,255,${alpha})`;
-        ctx.fill();
-      }
-      ctx.restore();
-
-      // ── Sweep leading edge — bright line ─────────────
+      // ── Sweep leading edge ──────────────────────────
       ctx.save();
       ctx.strokeStyle = 'rgba(0,255,255,0.95)';
       ctx.lineWidth = 2;
@@ -175,98 +237,115 @@ export function RadarCanvas({ complaints, replayTime, dotLifetime, onPing }: Pro
       ctx.stroke();
       ctx.restore();
 
-      // ── Borough outlines — brighter in beam path ─────
-      // Re-draw boroughs in the illuminated zone
+      // ── Borough outlines — illuminated in beam ──────
       ctx.save();
       ctx.beginPath();
       ctx.moveTo(CX, CY);
-      ctx.arc(CX, CY, R, sweep - TRAIL_ARC * 0.3, sweep);
+      ctx.arc(CX, CY, R, sweep - TRAIL_ARC * 0.25, sweep);
       ctx.closePath();
       ctx.clip();
-      ctx.strokeStyle = 'rgba(0,200,220,0.25)';
+      ctx.strokeStyle = 'rgba(0,200,220,0.2)';
       ctx.lineWidth = 0.8;
       for (const p of boroughPaths) ctx.stroke(p);
-      ctx.fillStyle = 'rgba(0,160,190,0.03)';
-      for (const p of boroughPaths) ctx.fill(p);
       ctx.restore();
 
-      // ── Draw dots ────────────────────────────────────
+      // ── Dots ────────────────────────────────────────
       const dots = dotsRef.current;
       for (let i = 0; i < dots.length; i++) {
         const d = dots[i];
         const age = now - d.createdMs;
         if (age < 0 || age > lifetime) continue;
 
-        // Fire ping when first visible
         if (!pingedRef.current.has(d.key)) {
           pingedRef.current.add(d.key);
           onPingRef.current(d.complaint);
         }
 
-        const freshness = 1 - age / lifetime; // 1=new, 0=expiring
-        const isNew = age < 90000; // first 1.5 min = "new"
+        const freshness = 1 - age / lifetime;
+        const isNew = age < 90000;
 
-        // How close is this dot to the beam? (angular distance behind sweep)
-        const behindSweep = (sweep - d.angle + 2 * Math.PI) % (2 * Math.PI);
-        const inBeam = behindSweep < TRAIL_ARC;
-        const beamBrightness = inBeam ? Math.pow(1 - behindSweep / TRAIL_ARC, 2) : 0;
-
-        // Base visibility: very dim in the dark, brighter near beam
-        const baseAlpha = 0.04 + beamBrightness * 0.35;
+        // Beam proximity
+        const behind = (sweep - d.angle + 2 * Math.PI) % (2 * Math.PI);
+        const inBeam = behind < TRAIL_ARC;
+        const beamBright = inBeam ? Math.pow(1 - behind / TRAIL_ARC, 3) : 0;
 
         ctx.save();
         if (isNew) {
-          // New dot: always bright, glowing
-          const pingPhase = age / 90000;
-          const glow = 1 - pingPhase;
-          ctx.globalAlpha = Math.max(0.5 + 0.5 * glow, baseAlpha);
+          const glow = 1 - age / 90000;
+          ctx.globalAlpha = 0.5 + 0.5 * glow;
           ctx.fillStyle = d.color;
           ctx.shadowColor = d.color;
-          ctx.shadowBlur = 18 * glow;
+          ctx.shadowBlur = 20 * glow;
           ctx.beginPath();
-          ctx.arc(d.x, d.y, 2.5 + 3.5 * glow, 0, 2 * Math.PI);
+          ctx.arc(d.x, d.y, 2.5 + 4 * glow, 0, 2 * Math.PI);
           ctx.fill();
+          // Ring burst on brand new
+          if (glow > 0.7) {
+            ctx.strokeStyle = d.color;
+            ctx.globalAlpha = (glow - 0.7) * 3;
+            ctx.lineWidth = 1;
+            ctx.beginPath();
+            ctx.arc(d.x, d.y, 6 + (1 - glow) * 20, 0, 2 * Math.PI);
+            ctx.stroke();
+          }
         } else {
-          // Existing dot: dim in dark, lights up when beam passes
-          ctx.globalAlpha = baseAlpha + freshness * 0.15;
+          const alpha = 0.03 + beamBright * 0.45 + freshness * 0.08;
+          ctx.globalAlpha = Math.min(alpha, 0.9);
           ctx.fillStyle = d.color;
-          if (beamBrightness > 0.3) {
+          if (beamBright > 0.2) {
             ctx.shadowColor = d.color;
-            ctx.shadowBlur = 6 * beamBrightness;
+            ctx.shadowBlur = 5 * beamBright;
           }
           ctx.beginPath();
-          ctx.arc(d.x, d.y, 1.5 + freshness * 1 + beamBrightness * 1, 0, 2 * Math.PI);
+          ctx.arc(d.x, d.y, 1.2 + freshness * 0.8 + beamBright * 1.2, 0, 2 * Math.PI);
           ctx.fill();
         }
         ctx.restore();
       }
 
-      // ── Center dot ───────────────────────────────────
+      // ── HUD: active count + scan rate ───────────────
+      ctx.save();
+      ctx.font = '8px JetBrains Mono, monospace';
+      ctx.fillStyle = 'rgba(0,200,220,0.3)';
+      ctx.textAlign = 'left';
+      const visCount = dots.filter(d => {
+        const a = now - d.createdMs;
+        return a >= 0 && a <= lifetime;
+      }).length;
+      ctx.fillText(`TGT: ${visCount}`, 14, SIZE - 28);
+      ctx.fillText(`SWP: ${((frameCount.current / 60) | 0) % 100}`, 14, SIZE - 16);
+      ctx.textAlign = 'right';
+      const bearing = ((((sweep * 180) / Math.PI) + 90) % 360) | 0;
+      ctx.fillText(`BRG: ${String(bearing).padStart(3, '0')}°`, SIZE - 14, SIZE - 28);
+      ctx.fillText(`RNG: 20 MI`, SIZE - 14, SIZE - 16);
+      ctx.restore();
+
+      // ── Center dot ──────────────────────────────────
       ctx.save();
       ctx.fillStyle = '#00ccff';
       ctx.shadowColor = '#00ccff';
-      ctx.shadowBlur = 14;
+      ctx.shadowBlur = 10;
       ctx.beginPath();
-      ctx.arc(CX, CY, 2.5, 0, 2 * Math.PI);
+      ctx.arc(CX, CY, 2, 0, 2 * Math.PI);
       ctx.fill();
       ctx.restore();
 
       ctx.restore(); // end clip
 
-      // ── Outer ring ───────────────────────────────────
-      ctx.strokeStyle = 'rgba(0,200,220,0.3)';
+      // ── Outer ring ──────────────────────────────────
+      ctx.strokeStyle = 'rgba(0,200,220,0.25)';
       ctx.lineWidth = 1.5;
       ctx.beginPath();
       ctx.arc(CX, CY, R, 0, 2 * Math.PI);
       ctx.stroke();
 
-      // ── Edge vignette — darken the outer 25% ────────
+      // ── Edge vignette ───────────────────────────────
       ctx.save();
-      const vignette = ctx.createRadialGradient(CX, CY, R * 0.6, CX, CY, R);
-      vignette.addColorStop(0, 'rgba(1,5,9,0)');
-      vignette.addColorStop(0.7, 'rgba(1,5,9,0)');
-      vignette.addColorStop(1, 'rgba(1,5,9,0.7)');
-      ctx.fillStyle = vignette;
+      const vig = ctx.createRadialGradient(CX, CY, R * 0.55, CX, CY, R);
+      vig.addColorStop(0, 'rgba(1,4,8,0)');
+      vig.addColorStop(0.65, 'rgba(1,4,8,0)');
+      vig.addColorStop(1, 'rgba(1,4,8,0.75)');
+      ctx.fillStyle = vig;
       ctx.beginPath();
       ctx.arc(CX, CY, R + 1, 0, 2 * Math.PI);
       ctx.fill();
