@@ -49,20 +49,18 @@ export function getComplaintColor(type: string): string {
 }
 
 export async function fetchComplaints(): Promise<Complaint[]> {
+  // NOTE: Never use URLSearchParams — encodes '$' as '%24' breaking Socrata
+  // Use simple date string (YYYY-MM-DD) — Socrata handles it fine
   const since = new Date(Date.now() - 24 * 60 * 60 * 1000)
     .toISOString()
-    .replace('T', ' ')
-    .replace(/\..+$/, '');  // "2026-03-05 06:00:00"
+    .split('T')[0];  // "2026-03-05"
 
-  const params = new URLSearchParams();
-  params.set('$where', `created_date >= '${since}' AND latitude IS NOT NULL AND longitude IS NOT NULL`);
-  params.set('$order', 'created_date DESC');
-  params.set('$limit', '2000');
+  const qs = `$where=latitude+IS+NOT+NULL+AND+longitude+IS+NOT+NULL+AND+created_date>'${since}'&$order=created_date+DESC&$limit=2000`;
 
-  const res = await fetch(`/api/311?${params.toString()}`, { cache: 'no-store' });
+  const res = await fetch(`/api/311?${qs}`, { cache: 'no-store' });
   if (!res.ok) {
     const txt = await res.text();
-    throw new Error(`311 API error: ${res.status} — ${txt.slice(0, 100)}`);
+    throw new Error(`311 API error: ${res.status} — ${txt.slice(0, 200)}`);
   }
   return res.json();
 }
