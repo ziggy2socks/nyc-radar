@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useCallback } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { RadarCanvas } from './RadarCanvas';
 import { fetchComplaints, getComplaintColor, getTopComplaintTypes } from './complaints';
 import type { Complaint } from './complaints';
@@ -13,8 +13,6 @@ export default function App() {
   const [feed, setFeed] = useState<Complaint[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const sweepAngleRef = useRef<number>(-Math.PI / 2);
-
   useEffect(() => {
     async function load() {
       try {
@@ -97,7 +95,6 @@ export default function App() {
           complaints={filteredComplaints}
           activeTypes={activeTypes}
           onPing={handlePing}
-          sweepAngleRef={sweepAngleRef}
         />
       </div>
 
