@@ -1,0 +1,8 @@
+{
+  "rewrites": [
+    {
+      "source": "/api/311/:path*",
+      "destination": "https://data.cityofnewyork.us/resource/erm6-by3h.json/:path*"
+    }
+  ]
+}
