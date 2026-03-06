@@ -17,7 +17,7 @@ const R = SIZE / 2 - 2;
 const CX = SIZE / 2;
 const CY = SIZE / 2;
 const SWEEP_SPEED = (2 * Math.PI) / 7000;
-const TRAIL_ARC = Math.PI * 1.4; // ~252° trailing glow
+const TRAIL_ARC = Math.PI * 1.4;
 
 interface DotInfo {
   key: string;
@@ -25,14 +25,19 @@ interface DotInfo {
   x: number;
   y: number;
   angle: number;
-  dist: number; // distance from center (for range readout)
+  dist: number;
   color: string;
   createdMs: number;
 }
 
+// A dot that has been "discovered" by the beam
+interface ActiveDot {
+  dot: DotInfo;
+  discoveredAt: number; // replay time when beam first passed it
+}
+
 const project = makeProjection(SIZE);
 
-// Borough paths
 let boroughPaths: Path2D[] = [];
 fetch('/boroughs.geojson')
   .then(r => r.json())
@@ -54,7 +59,7 @@ fetch('/boroughs.geojson')
   })
   .catch(console.error);
 
-// Pre-render the sweep trail as an offscreen canvas (smooth gradient, no stepping)
+// Offscreen trail canvas
 const trailCanvas = document.createElement('canvas');
 trailCanvas.width = SIZE;
 trailCanvas.height = SIZE;
@@ -62,18 +67,14 @@ trailCanvas.height = SIZE;
 function renderTrail(sweep: number) {
   const tctx = trailCanvas.getContext('2d')!;
   tctx.clearRect(0, 0, SIZE, SIZE);
-
-  // Draw 60 thin slices for smooth conical gradient
   const slices = 60;
   const sliceArc = TRAIL_ARC / slices;
   for (let s = 0; s < slices; s++) {
-    const frac = s / slices; // 0=leading, 1=tail
-    const alpha = Math.pow(1 - frac, 3) * 0.14; // cubic falloff
+    const frac = s / slices;
+    const alpha = Math.pow(1 - frac, 3) * 0.14;
     if (alpha < 0.002) continue;
-
     const a0 = sweep - sliceArc * (s + 1);
     const a1 = sweep - sliceArc * s;
-
     tctx.beginPath();
     tctx.moveTo(CX, CY);
     tctx.arc(CX, CY, R, a0, a1);
@@ -87,17 +88,24 @@ export function RadarCanvas({ complaints, replayTime, dotLifetime, onPing }: Pro
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const angleRef = useRef(-Math.PI / 2);
   const lastTsRef = useRef(0);
-  const dotsRef = useRef<DotInfo[]>([]);
+  const frameCount = useRef(0);
+
+  // All complaint dots (pre-computed positions)
+  const allDotsRef = useRef<DotInfo[]>([]);
+  // Dots waiting to be discovered (created_date <= replayTime, not yet swept)
+  const pendingRef = useRef<Map<string, DotInfo>>(new Map());
+  // Discovered dots (beam has passed them)
+  const activeRef = useRef<Map<string, ActiveDot>>(new Map());
+
   const replayRef = useRef(replayTime);
   const dotLifeRef = useRef(dotLifetime);
   const onPingRef = useRef(onPing);
-  const pingedRef = useRef<Set<string>>(new Set());
-  const frameCount = useRef(0);
 
   replayRef.current = replayTime;
   dotLifeRef.current = dotLifetime;
   onPingRef.current = onPing;
 
+  // Pre-compute all dot positions when complaints change
   useMemo(() => {
     const result: DotInfo[] = [];
     for (const c of complaints) {
@@ -117,8 +125,9 @@ export function RadarCanvas({ complaints, replayTime, dotLifetime, onPing }: Pro
         createdMs: new Date(c.created_date).getTime(),
       });
     }
-    dotsRef.current = result;
-    pingedRef.current.clear();
+    allDotsRef.current = result;
+    pendingRef.current.clear();
+    activeRef.current.clear();
   }, [complaints]);
 
   useEffect(() => {
@@ -136,17 +145,44 @@ export function RadarCanvas({ complaints, replayTime, dotLifetime, onPing }: Pro
       const lifetime = dotLifeRef.current;
       frameCount.current++;
 
+      // ── Move newly eligible dots into pending ───────
+      // (created_date <= replay time, not already pending or active)
+      for (const d of allDotsRef.current) {
+        if (d.createdMs > now) continue; // not yet in replay timeline
+        if (pendingRef.current.has(d.key)) continue;
+        if (activeRef.current.has(d.key)) continue;
+        pendingRef.current.set(d.key, d);
+      }
+
+      // ── Beam discovery: pending dots under the beam become active ──
+      for (const [key, d] of pendingRef.current) {
+        const behind = (sweep - d.angle + 2 * Math.PI) % (2 * Math.PI);
+        if (behind < 0.15) { // beam is passing this dot (~8.5°)
+          pendingRef.current.delete(key);
+          activeRef.current.set(key, { dot: d, discoveredAt: now });
+          onPingRef.current(d.complaint);
+        }
+      }
+
+      // ── Expire old active dots ──────────────────────
+      for (const [key, ad] of activeRef.current) {
+        if (now - ad.discoveredAt > lifetime) {
+          activeRef.current.delete(key);
+        }
+      }
+
+      // ── DRAW ────────────────────────────────────────
       ctx.clearRect(0, 0, SIZE, SIZE);
       ctx.save();
       ctx.beginPath();
       ctx.arc(CX, CY, R, 0, 2 * Math.PI);
       ctx.clip();
 
-      // ── Background — very dark ──────────────────────
+      // Background
       ctx.fillStyle = '#010408';
       ctx.fillRect(0, 0, SIZE, SIZE);
 
-      // ── Subtle scan lines (CRT effect) ──────────────
+      // CRT scanlines
       ctx.save();
       ctx.globalAlpha = 0.03;
       for (let y = 0; y < SIZE; y += 3) {
@@ -155,7 +191,7 @@ export function RadarCanvas({ complaints, replayTime, dotLifetime, onPing }: Pro
       }
       ctx.restore();
 
-      // ── Grid rings with range labels ────────────────
+      // Grid rings + range labels
       ctx.strokeStyle = 'rgba(0,180,200,0.06)';
       ctx.lineWidth = 0.5;
       ctx.font = '7px JetBrains Mono, monospace';
@@ -166,26 +202,21 @@ export function RadarCanvas({ complaints, replayTime, dotLifetime, onPing }: Pro
         ctx.beginPath();
         ctx.arc(CX, CY, r, 0, 2 * Math.PI);
         ctx.stroke();
-        // Label at top of each ring
         ctx.fillText(rangeLabels[i - 1], CX + 3, CY - r + 10);
       }
 
-      // ── Bearing marks around outer ring ─────────────
+      // Bearing marks
       ctx.save();
       ctx.font = '7px JetBrains Mono, monospace';
       ctx.fillStyle = 'rgba(0,180,200,0.2)';
       ctx.textAlign = 'center';
-      const bearings = [
+      for (const b of [
         { deg: 0, label: 'E' }, { deg: 90, label: 'S' },
         { deg: 180, label: 'W' }, { deg: 270, label: 'N' },
-      ];
-      for (const b of bearings) {
+      ]) {
         const rad = (b.deg * Math.PI) / 180;
-        const lx = CX + Math.cos(rad) * (R - 14);
-        const ly = CY + Math.sin(rad) * (R - 14) + 3;
-        ctx.fillText(b.label, lx, ly);
+        ctx.fillText(b.label, CX + Math.cos(rad) * (R - 14), CY + Math.sin(rad) * (R - 14) + 3);
       }
-      // Tick marks every 30°
       ctx.strokeStyle = 'rgba(0,180,200,0.1)';
       ctx.lineWidth = 1;
       for (let deg = 0; deg < 360; deg += 30) {
@@ -195,7 +226,6 @@ export function RadarCanvas({ complaints, replayTime, dotLifetime, onPing }: Pro
         ctx.lineTo(CX + Math.cos(rad) * R, CY + Math.sin(rad) * R);
         ctx.stroke();
       }
-      // Minor ticks every 10°
       ctx.strokeStyle = 'rgba(0,180,200,0.05)';
       for (let deg = 0; deg < 360; deg += 10) {
         if (deg % 30 === 0) continue;
@@ -207,7 +237,7 @@ export function RadarCanvas({ complaints, replayTime, dotLifetime, onPing }: Pro
       }
       ctx.restore();
 
-      // ── Crosshairs ──────────────────────────────────
+      // Crosshairs
       ctx.strokeStyle = 'rgba(0,180,200,0.04)';
       ctx.setLineDash([2, 8]);
       ctx.beginPath();
@@ -216,16 +246,16 @@ export function RadarCanvas({ complaints, replayTime, dotLifetime, onPing }: Pro
       ctx.stroke();
       ctx.setLineDash([]);
 
-      // ── Borough outlines — very dim ─────────────────
+      // Borough outlines — dim
       ctx.strokeStyle = 'rgba(0,200,220,0.06)';
       ctx.lineWidth = 0.5;
       for (const p of boroughPaths) ctx.stroke(p);
 
-      // ── Sweep trail — smooth via offscreen canvas ───
+      // Sweep trail
       renderTrail(sweep);
       ctx.drawImage(trailCanvas, 0, 0);
 
-      // ── Sweep leading edge ──────────────────────────
+      // Sweep line
       ctx.save();
       ctx.strokeStyle = 'rgba(0,255,255,0.95)';
       ctx.lineWidth = 2;
@@ -237,7 +267,7 @@ export function RadarCanvas({ complaints, replayTime, dotLifetime, onPing }: Pro
       ctx.stroke();
       ctx.restore();
 
-      // ── Borough outlines — illuminated in beam ──────
+      // Borough outlines illuminated in beam
       ctx.save();
       ctx.beginPath();
       ctx.moveTo(CX, CY);
@@ -249,48 +279,43 @@ export function RadarCanvas({ complaints, replayTime, dotLifetime, onPing }: Pro
       for (const p of boroughPaths) ctx.stroke(p);
       ctx.restore();
 
-      // ── Dots ────────────────────────────────────────
-      const dots = dotsRef.current;
-      for (let i = 0; i < dots.length; i++) {
-        const d = dots[i];
-        const age = now - d.createdMs;
-        if (age < 0 || age > lifetime) continue;
-
-        if (!pingedRef.current.has(d.key)) {
-          pingedRef.current.add(d.key);
-          onPingRef.current(d.complaint);
-        }
-
+      // ── Draw active (discovered) dots ───────────────
+      for (const [, ad] of activeRef.current) {
+        const d = ad.dot;
+        const age = now - ad.discoveredAt; // time since beam found it
         const freshness = 1 - age / lifetime;
-        const isNew = age < 90000;
+        const isNew = age < 120000; // first 2 min = highlight phase
 
-        // Beam proximity
+        // Beam proximity for re-illumination on subsequent passes
         const behind = (sweep - d.angle + 2 * Math.PI) % (2 * Math.PI);
         const inBeam = behind < TRAIL_ARC;
         const beamBright = inBeam ? Math.pow(1 - behind / TRAIL_ARC, 3) : 0;
 
         ctx.save();
         if (isNew) {
-          const glow = 1 - age / 90000;
-          ctx.globalAlpha = 0.5 + 0.5 * glow;
+          // Newly discovered — bright with glow
+          const phase = age / 120000;
+          const glow = 1 - phase;
+          ctx.globalAlpha = 0.4 + 0.6 * glow;
           ctx.fillStyle = d.color;
           ctx.shadowColor = d.color;
-          ctx.shadowBlur = 20 * glow;
+          ctx.shadowBlur = 18 * glow;
           ctx.beginPath();
-          ctx.arc(d.x, d.y, 2.5 + 4 * glow, 0, 2 * Math.PI);
+          ctx.arc(d.x, d.y, 2 + 4 * glow, 0, 2 * Math.PI);
           ctx.fill();
-          // Ring burst on brand new
-          if (glow > 0.7) {
+          // Ring burst in first 0.5s
+          if (glow > 0.85) {
             ctx.strokeStyle = d.color;
-            ctx.globalAlpha = (glow - 0.7) * 3;
+            ctx.globalAlpha = (glow - 0.85) * 6;
             ctx.lineWidth = 1;
             ctx.beginPath();
-            ctx.arc(d.x, d.y, 6 + (1 - glow) * 20, 0, 2 * Math.PI);
+            ctx.arc(d.x, d.y, 6 + (1 - glow) * 30, 0, 2 * Math.PI);
             ctx.stroke();
           }
         } else {
-          const alpha = 0.03 + beamBright * 0.45 + freshness * 0.08;
-          ctx.globalAlpha = Math.min(alpha, 0.9);
+          // Settled dot — dim, lights up when beam re-passes
+          const alpha = 0.03 + beamBright * 0.4 + freshness * 0.08;
+          ctx.globalAlpha = Math.min(alpha, 0.85);
           ctx.fillStyle = d.color;
           if (beamBright > 0.2) {
             ctx.shadowColor = d.color;
@@ -303,24 +328,20 @@ export function RadarCanvas({ complaints, replayTime, dotLifetime, onPing }: Pro
         ctx.restore();
       }
 
-      // ── HUD: active count + scan rate ───────────────
+      // HUD
       ctx.save();
       ctx.font = '8px JetBrains Mono, monospace';
       ctx.fillStyle = 'rgba(0,200,220,0.3)';
       ctx.textAlign = 'left';
-      const visCount = dots.filter(d => {
-        const a = now - d.createdMs;
-        return a >= 0 && a <= lifetime;
-      }).length;
-      ctx.fillText(`TGT: ${visCount}`, 14, SIZE - 28);
-      ctx.fillText(`SWP: ${((frameCount.current / 60) | 0) % 100}`, 14, SIZE - 16);
+      ctx.fillText(`TGT: ${activeRef.current.size}`, 14, SIZE - 28);
+      ctx.fillText(`PND: ${pendingRef.current.size}`, 14, SIZE - 16);
       ctx.textAlign = 'right';
       const bearing = ((((sweep * 180) / Math.PI) + 90) % 360) | 0;
       ctx.fillText(`BRG: ${String(bearing).padStart(3, '0')}°`, SIZE - 14, SIZE - 28);
       ctx.fillText(`RNG: 20 MI`, SIZE - 14, SIZE - 16);
       ctx.restore();
 
-      // ── Center dot ──────────────────────────────────
+      // Center dot
       ctx.save();
       ctx.fillStyle = '#00ccff';
       ctx.shadowColor = '#00ccff';
@@ -332,14 +353,14 @@ export function RadarCanvas({ complaints, replayTime, dotLifetime, onPing }: Pro
 
       ctx.restore(); // end clip
 
-      // ── Outer ring ──────────────────────────────────
+      // Outer ring
       ctx.strokeStyle = 'rgba(0,200,220,0.25)';
       ctx.lineWidth = 1.5;
       ctx.beginPath();
       ctx.arc(CX, CY, R, 0, 2 * Math.PI);
       ctx.stroke();
 
-      // ── Edge vignette ───────────────────────────────
+      // Edge vignette
       ctx.save();
       const vig = ctx.createRadialGradient(CX, CY, R * 0.55, CX, CY, R);
       vig.addColorStop(0, 'rgba(1,4,8,0)');
