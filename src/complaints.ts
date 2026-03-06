@@ -1,5 +1,5 @@
 // NYC 311 complaint data via NYC Open Data
-// Dataset: 311 Service Requests (erm6-by3h)
+// Dataset: 311 Service Requests from 2020 to Present (erm2-nwe9)
 
 export interface Complaint {
   unique_key: string;

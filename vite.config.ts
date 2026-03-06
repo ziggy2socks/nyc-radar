@@ -9,7 +9,7 @@ export default defineConfig({
       '/api/311': {
         target: 'https://data.cityofnewyork.us',
         changeOrigin: true,
-        rewrite: (path) => path.replace(/^\/api\/311/, '/resource/erm6-by3h.json'),
+        rewrite: (path) => path.replace(/^\/api\/311/, '/resource/erm2-nwe9.json'),
       },
     },
   },

@@ -2,7 +2,7 @@
   "rewrites": [
     {
       "source": "/api/311/:path*",
-      "destination": "https://data.cityofnewyork.us/resource/erm6-by3h.json/:path*"
+      "destination": "https://data.cityofnewyork.us/resource/erm2-nwe9.json/:path*"
     }
   ]
 }
