@@ -1,7 +1,7 @@
 import { useEffect, useRef, useCallback } from 'react';
 import type { Complaint } from './complaints';
 import { getComplaintColor } from './complaints';
-import { latLonToXY } from './coordinates';
+import { makeProjection } from './coordinates';
 
 interface Props {
   complaints: Complaint[];
@@ -10,17 +10,46 @@ interface Props {
   sweepAngleRef: React.MutableRefObject<number>;
 }
 
-const SWEEP_SPEED = (2 * Math.PI) / 6000; // full rotation in 6 seconds (rad/ms)
-const TRAIL_ANGLE = Math.PI / 2.5;          // ~72° trailing glow
-const PING_FADE_MS = 4000;                  // how long a ping stays visible
+const CANVAS_SIZE = 600;
+const SWEEP_SPEED = (2 * Math.PI) / 6000; // full rotation in 6 seconds
+const TRAIL_ANGLE = Math.PI / 2.5;
+const PING_FADE_MS = 5000;
 
 interface PingState {
   complaint: Complaint;
   x: number;
   y: number;
   color: string;
-  born: number;  // timestamp when sweep hit it
+  born: number;
 }
+
+// Pre-project all borough paths once (loaded async)
+const project = makeProjection(CANVAS_SIZE);
+let BOROUGH_PATHS: Path2D[] = [];
+
+fetch('/boroughs.geojson')
+  .then(r => r.json())
+  .then((geojson: any) => {
+    BOROUGH_PATHS = [];
+    for (const feature of geojson.features) {
+      const geom = feature.geometry;
+      const polys = geom.type === 'MultiPolygon' ? geom.coordinates : [geom.coordinates];
+      for (const poly of polys) {
+        const path = new Path2D();
+        for (const ring of poly) {
+          let first = true;
+          for (const [lon, lat] of ring) {
+            const { x, y } = project(lat, lon);
+            if (first) { path.moveTo(x, y); first = false; }
+            else path.lineTo(x, y);
+          }
+          path.closePath();
+        }
+        BOROUGH_PATHS.push(path);
+      }
+    }
+  })
+  .catch(console.error);
 
 export function RadarCanvas({ complaints, activeTypes, onPing, sweepAngleRef }: Props) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -29,26 +58,23 @@ export function RadarCanvas({ complaints, activeTypes, onPing, sweepAngleRef }: 
   const lastTimeRef = useRef<number>(0);
   const sweptRef = useRef<Set<string>>(new Set());
 
+  const cx = CANVAS_SIZE / 2;
+  const cy = CANVAS_SIZE / 2;
+  const R = CANVAS_SIZE / 2 - 2;
+
   const draw = useCallback((timestamp: number) => {
     const canvas = canvasRef.current;
     if (!canvas) return;
     const ctx = canvas.getContext('2d')!;
-    const W = canvas.width;
-    const H = canvas.height;
-    const cx = W / 2;
-    const cy = H / 2;
-    const R = Math.min(W, H) / 2 - 2;
 
-    // Delta time
     const dt = lastTimeRef.current ? timestamp - lastTimeRef.current : 16;
     lastTimeRef.current = timestamp;
 
-    // Advance sweep angle
     sweepAngleRef.current = (sweepAngleRef.current + SWEEP_SPEED * dt) % (2 * Math.PI);
     const sweep = sweepAngleRef.current;
 
     // ── Clear ──────────────────────────────────────────────
-    ctx.clearRect(0, 0, W, H);
+    ctx.clearRect(0, 0, CANVAS_SIZE, CANVAS_SIZE);
 
     // ── Circular clip ──────────────────────────────────────
     ctx.save();
@@ -58,10 +84,10 @@ export function RadarCanvas({ complaints, activeTypes, onPing, sweepAngleRef }: 
 
     // ── Background ─────────────────────────────────────────
     ctx.fillStyle = '#020810';
-    ctx.fillRect(0, 0, W, H);
+    ctx.fillRect(0, 0, CANVAS_SIZE, CANVAS_SIZE);
 
     // ── Grid rings ─────────────────────────────────────────
-    ctx.strokeStyle = 'rgba(0, 180, 200, 0.12)';
+    ctx.strokeStyle = 'rgba(0, 180, 200, 0.1)';
     ctx.lineWidth = 1;
     for (let r = R / 4; r <= R; r += R / 4) {
       ctx.beginPath();
@@ -69,70 +95,72 @@ export function RadarCanvas({ complaints, activeTypes, onPing, sweepAngleRef }: 
       ctx.stroke();
     }
 
-    // ── Grid crosshairs ────────────────────────────────────
-    ctx.strokeStyle = 'rgba(0, 180, 200, 0.1)';
+    // ── Crosshairs ─────────────────────────────────────────
+    ctx.strokeStyle = 'rgba(0, 180, 200, 0.08)';
+    ctx.setLineDash([4, 8]);
     ctx.beginPath();
     ctx.moveTo(cx - R, cy); ctx.lineTo(cx + R, cy);
     ctx.moveTo(cx, cy - R); ctx.lineTo(cx, cy + R);
     ctx.stroke();
+    ctx.setLineDash([]);
 
-    // ── NYC borough outlines ───────────────────────────────
-    drawBoroughOutlines(ctx, cx, cy);
+    // ── Borough fills ──────────────────────────────────────
+    ctx.fillStyle = 'rgba(0, 160, 190, 0.06)';
+    for (const path of BOROUGH_PATHS) ctx.fill(path);
+
+    // ── Borough outlines ───────────────────────────────────
+    ctx.strokeStyle = 'rgba(0, 200, 220, 0.3)';
+    ctx.lineWidth = 0.8;
+    for (const path of BOROUGH_PATHS) ctx.stroke(path);
 
     // ── Sweep trail ────────────────────────────────────────
-    // Draw sweep as filled arc wedge
-    ctx.save();
     const trailStart = sweep - TRAIL_ANGLE;
+    ctx.save();
     ctx.beginPath();
     ctx.moveTo(cx, cy);
     ctx.arc(cx, cy, R, trailStart, sweep);
     ctx.closePath();
-    // Radial gradient for fade
     const sweepGrad = ctx.createRadialGradient(cx, cy, 0, cx, cy, R);
     sweepGrad.addColorStop(0, 'rgba(0, 220, 255, 0.0)');
-    sweepGrad.addColorStop(0.4, 'rgba(0, 220, 255, 0.04)');
-    sweepGrad.addColorStop(1, 'rgba(0, 220, 255, 0.12)');
+    sweepGrad.addColorStop(0.5, 'rgba(0, 220, 255, 0.03)');
+    sweepGrad.addColorStop(1, 'rgba(0, 220, 255, 0.10)');
     ctx.fillStyle = sweepGrad;
     ctx.fill();
     ctx.restore();
 
-    // ── Sweep leading edge line ────────────────────────────
+    // ── Sweep leading edge ─────────────────────────────────
     ctx.save();
-    ctx.strokeStyle = 'rgba(0, 255, 255, 0.85)';
+    ctx.strokeStyle = 'rgba(0, 255, 255, 0.9)';
     ctx.lineWidth = 1.5;
     ctx.shadowColor = '#00ffff';
-    ctx.shadowBlur = 8;
+    ctx.shadowBlur = 10;
     ctx.beginPath();
     ctx.moveTo(cx, cy);
     ctx.lineTo(cx + Math.cos(sweep) * R, cy + Math.sin(sweep) * R);
     ctx.stroke();
     ctx.restore();
 
-    // ── Check for newly swept complaints ──────────────────
+    // ── Detect newly swept complaints ──────────────────────
     const now = timestamp;
     for (const c of complaints) {
       if (!activeTypes.has(c.complaint_type)) continue;
+      if (sweptRef.current.has(c.unique_key)) continue;
       const lat = parseFloat(c.latitude ?? '');
       const lon = parseFloat(c.longitude ?? '');
       if (isNaN(lat) || isNaN(lon)) continue;
-      if (sweptRef.current.has(c.unique_key)) continue;
 
-      const { x, y } = latLonToXY(lat, lon, cx, cy);
+      const { x, y } = project(lat, lon);
       const dx = x - cx;
       const dy = y - cy;
-      const dist = Math.sqrt(dx * dx + dy * dy);
-      if (dist > R) continue; // outside radar circle
+      if (Math.sqrt(dx * dx + dy * dy) > R) continue;
 
-      // Angle of this dot
       const dotAngle = (Math.atan2(dy, dx) + 2 * Math.PI) % (2 * Math.PI);
       const sweepNorm = (sweep + 2 * Math.PI) % (2 * Math.PI);
-
-      // Is dot within the last ~2° behind the sweep line?
       const diff = (sweepNorm - dotAngle + 2 * Math.PI) % (2 * Math.PI);
-      if (diff < 0.06) {
+
+      if (diff < 0.08) {
         sweptRef.current.add(c.unique_key);
-        const color = getComplaintColor(c.complaint_type);
-        pingsRef.current.push({ complaint: c, x, y, color, born: now });
+        pingsRef.current.push({ complaint: c, x, y, color: getComplaintColor(c.complaint_type), born: now });
         onPing(c);
       }
     }
@@ -142,15 +170,14 @@ export function RadarCanvas({ complaints, activeTypes, onPing, sweepAngleRef }: 
     for (const ping of pingsRef.current) {
       const age = now - ping.born;
       const alpha = Math.max(0, 1 - age / PING_FADE_MS);
-      const pulseR = 2 + (age / PING_FADE_MS) * 3; // grows slightly as it fades
-
+      const r = 1.5 + (age / PING_FADE_MS) * 2.5;
       ctx.save();
       ctx.globalAlpha = alpha;
       ctx.fillStyle = ping.color;
       ctx.shadowColor = ping.color;
-      ctx.shadowBlur = 6 * alpha;
+      ctx.shadowBlur = 8 * alpha;
       ctx.beginPath();
-      ctx.arc(ping.x, ping.y, pulseR, 0, 2 * Math.PI);
+      ctx.arc(ping.x, ping.y, r, 0, 2 * Math.PI);
       ctx.fill();
       ctx.restore();
     }
@@ -159,7 +186,7 @@ export function RadarCanvas({ complaints, activeTypes, onPing, sweepAngleRef }: 
     ctx.save();
     ctx.fillStyle = '#00ccff';
     ctx.shadowColor = '#00ccff';
-    ctx.shadowBlur = 10;
+    ctx.shadowBlur = 12;
     ctx.beginPath();
     ctx.arc(cx, cy, 3, 0, 2 * Math.PI);
     ctx.fill();
@@ -169,7 +196,7 @@ export function RadarCanvas({ complaints, activeTypes, onPing, sweepAngleRef }: 
 
     // ── Outer ring ─────────────────────────────────────────
     ctx.save();
-    ctx.strokeStyle = 'rgba(0, 200, 220, 0.35)';
+    ctx.strokeStyle = 'rgba(0, 200, 220, 0.4)';
     ctx.lineWidth = 1.5;
     ctx.beginPath();
     ctx.arc(cx, cy, R, 0, 2 * Math.PI);
@@ -177,91 +204,24 @@ export function RadarCanvas({ complaints, activeTypes, onPing, sweepAngleRef }: 
     ctx.restore();
 
     rafRef.current = requestAnimationFrame(draw);
-  }, [complaints, activeTypes, onPing, sweepAngleRef]);
+  }, [complaints, activeTypes, onPing, sweepAngleRef, cx, cy, R]);
 
   useEffect(() => {
-    sweepAngleRef.current = -Math.PI / 2; // start pointing up
+    sweepAngleRef.current = -Math.PI / 2;
     sweptRef.current.clear();
     pingsRef.current = [];
     rafRef.current = requestAnimationFrame(draw);
     return () => { if (rafRef.current) cancelAnimationFrame(rafRef.current); };
   }, [draw, sweepAngleRef]);
 
-  // Reset swept set when complaints refresh so dots can ping again
-  useEffect(() => {
-    sweptRef.current.clear();
-  }, [complaints]);
+  useEffect(() => { sweptRef.current.clear(); }, [complaints]);
 
   return (
     <canvas
       ref={canvasRef}
-      width={600}
-      height={600}
+      width={CANVAS_SIZE}
+      height={CANVAS_SIZE}
       className="radar-canvas"
     />
   );
 }
-
-// ── Borough outline paths (simplified polygons) ──────────────────────────────
-function drawBoroughOutlines(ctx: CanvasRenderingContext2D, cx: number, cy: number) {
-  ctx.save();
-  ctx.strokeStyle = 'rgba(0, 180, 200, 0.25)';
-  ctx.lineWidth = 1;
-  ctx.fillStyle = 'rgba(0, 180, 200, 0.04)';
-
-  // Each borough as an array of [lat, lon] points
-  const boroughs = [MANHATTAN, BROOKLYN, QUEENS, BRONX, STATEN_ISLAND];
-  for (const poly of boroughs) {
-    ctx.beginPath();
-    for (let i = 0; i < poly.length; i++) {
-      const { x, y } = latLonToXY(poly[i][0], poly[i][1], cx, cy);
-      if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
-    }
-    ctx.closePath();
-    ctx.fill();
-    ctx.stroke();
-  }
-  ctx.restore();
-}
-
-// Simplified borough polygons (lat, lon)
-const MANHATTAN: [number, number][] = [
-  [40.8789, -73.9330], [40.8737, -73.9104], [40.8480, -73.9295],
-  [40.8200, -73.9503], [40.7966, -73.9717], [40.7794, -73.9795],
-  [40.7685, -73.9797], [40.7550, -73.9707], [40.7479, -74.0082],
-  [40.7016, -74.0183], [40.7002, -74.0198], [40.7128, -74.0207],
-  [40.7308, -74.0078], [40.7529, -74.0020], [40.7694, -73.9958],
-  [40.7960, -73.9720], [40.8243, -73.9484], [40.8506, -73.9284],
-];
-
-const BROOKLYN: [number, number][] = [
-  [40.7394, -74.0052], [40.7200, -74.0135], [40.6501, -74.0341],
-  [40.5724, -74.0168], [40.5765, -73.9450], [40.5929, -73.9199],
-  [40.6283, -73.8952], [40.6625, -73.8804], [40.7005, -73.9037],
-  [40.7191, -73.9303], [40.7351, -73.9526],
-];
-
-const QUEENS: [number, number][] = [
-  [40.7351, -73.9526], [40.7191, -73.9303], [40.7005, -73.9037],
-  [40.6625, -73.8804], [40.6283, -73.8952], [40.5929, -73.9199],
-  [40.5765, -73.9450], [40.5724, -74.0168], [40.5569, -73.7680],
-  [40.5766, -73.7121], [40.6028, -73.7108], [40.7328, -73.7004],
-  [40.7597, -73.7010], [40.7958, -73.7122], [40.7887, -73.8000],
-  [40.7880, -73.8310], [40.7700, -73.8650], [40.7513, -73.9096],
-];
-
-const BRONX: [number, number][] = [
-  [40.8789, -73.9330], [40.8506, -73.9284], [40.8243, -73.9484],
-  [40.8097, -73.9277], [40.8049, -73.9171], [40.8080, -73.9019],
-  [40.8155, -73.8875], [40.8302, -73.8683], [40.8431, -73.8513],
-  [40.8556, -73.8355], [40.8687, -73.8107], [40.8946, -73.8219],
-  [40.9156, -73.8451], [40.9152, -73.8993], [40.8981, -73.9128],
-  [40.8917, -73.9226],
-];
-
-const STATEN_ISLAND: [number, number][] = [
-  [40.7002, -74.0198], [40.6501, -74.0341], [40.6000, -74.0750],
-  [40.5777, -74.1445], [40.4961, -74.2551], [40.4774, -74.2578],
-  [40.4783, -74.1856], [40.5088, -74.1325], [40.5490, -74.0879],
-  [40.5916, -74.0563], [40.6287, -74.0396],
-];

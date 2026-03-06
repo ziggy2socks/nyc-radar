@@ -1,23 +1,39 @@
-// Coordinate system for NYC radar
-// Maps lat/lon to canvas pixel coordinates
-// Center: roughly Midtown/LIC border — keeps all 5 boroughs in frame
+// Coordinate projection for NYC radar
+// Projects lat/lon to canvas XY, auto-fitted to a circular viewport
 
-export const CENTER_LAT = 40.730;
-export const CENTER_LON = -73.935;
+// NYC bounding box (all 5 boroughs)
+export const NYC_BOUNDS = {
+  minLat: 40.477,
+  maxLat: 40.920,
+  minLon: -74.260,
+  maxLon: -73.700,
+};
 
-// Scale: how many pixels per degree
-// NYC spans ~0.35° lat and ~0.4° lon
-// We want the city to fill roughly 80% of the radar circle
-const PX_PER_DEG_LAT = 1800;
-const PX_PER_DEG_LON = 1800 * Math.cos(CENTER_LAT * Math.PI / 180);
+// Center of the radar
+export const CENTER_LAT = (NYC_BOUNDS.minLat + NYC_BOUNDS.maxLat) / 2;
+export const CENTER_LON = (NYC_BOUNDS.minLon + NYC_BOUNDS.maxLon) / 2;
 
-export function latLonToXY(
-  lat: number,
-  lon: number,
-  canvasCx: number,
-  canvasCy: number
-): { x: number; y: number } {
-  const x = canvasCx + (lon - CENTER_LON) * PX_PER_DEG_LON;
-  const y = canvasCy - (lat - CENTER_LAT) * PX_PER_DEG_LAT;
-  return { x, y };
+// Scale to fit NYC in ~85% of the radar circle radius
+// Lat span ~0.443°, Lon span ~0.560° (lon is wider due to map aspect)
+// We scale to fit the wider dimension
+export function makeProjection(canvasSize: number) {
+  const R = canvasSize / 2;  // radar radius in pixels
+  const usable = R * 0.85;   // use 85% of radius
+
+  const latSpan = NYC_BOUNDS.maxLat - NYC_BOUNDS.minLat;
+  const lonSpan = NYC_BOUNDS.maxLon - NYC_BOUNDS.minLon;
+
+  // Correct lon for latitude compression
+  const lonCorrected = lonSpan * Math.cos(CENTER_LAT * Math.PI / 180);
+
+  // Scale: fit the larger span into usable radius
+  const scale = usable / Math.max(latSpan / 2, lonCorrected / 2);
+
+  return function latLonToXY(lat: number, lon: number): { x: number; y: number } {
+    const cx = canvasSize / 2;
+    const cy = canvasSize / 2;
+    const dx = (lon - CENTER_LON) * Math.cos(CENTER_LAT * Math.PI / 180) * scale;
+    const dy = -(lat - CENTER_LAT) * scale;
+    return { x: cx + dx, y: cy + dy };
+  };
 }
