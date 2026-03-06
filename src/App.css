@@ -75,6 +75,27 @@ html, body, #root {
   border: 1px solid rgba(0, 200, 220, 0.12);
 }
 
+.replay-date-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.date-nav {
+  font: bold 9px var(--font);
+  color: var(--text-muted);
+  background: none;
+  border: 1px solid var(--border);
+  padding: 1px 5px;
+  cursor: pointer;
+  line-height: 1;
+  transition: all 0.15s;
+}
+.date-nav:hover {
+  color: var(--cyan);
+  border-color: var(--cyan);
+}
+
 .replay-date {
   font-size: 8px;
   letter-spacing: 2px;

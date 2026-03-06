@@ -68,7 +68,7 @@ export function RadarCanvas({ complaints, replayTime, dotLifetime, newThreshold,
   newThreshRef.current = newThreshold;
   onPingRef.current = onPing;
 
-  // Pre-compute dot positions
+  // Pre-compute dot positions (no ping firing here — that happens in draw loop)
   useMemo(() => {
     const result: DotInfo[] = [];
     for (const c of complaints) {
@@ -88,14 +88,7 @@ export function RadarCanvas({ complaints, replayTime, dotLifetime, newThreshold,
       });
     }
     dotsRef.current = result;
-
-    // Fire onPing for newly appeared dots
-    for (const d of result) {
-      if (!pingedRef.current.has(d.key)) {
-        pingedRef.current.add(d.key);
-        onPingRef.current(d.complaint);
-      }
-    }
+    pingedRef.current.clear();
   }, [complaints]);
 
   // Single RAF loop — never restarts
@@ -174,12 +167,18 @@ export function RadarCanvas({ complaints, replayTime, dotLifetime, newThreshold,
       ctx.stroke();
       ctx.restore();
 
-      // Draw dots — brightness based on age
+      // Draw dots — brightness based on age + fire pings for newly visible
       const dots = dotsRef.current;
       for (let i = 0; i < dots.length; i++) {
         const d = dots[i];
         const age = now - d.createdMs; // ms since this complaint appeared
         if (age < 0 || age > lifetime) continue;
+
+        // Fire ping when dot first becomes visible
+        if (!pingedRef.current.has(d.key)) {
+          pingedRef.current.add(d.key);
+          onPingRef.current(d.complaint);
+        }
 
         const freshness = 1 - age / lifetime; // 1 = brand new, 0 = about to expire
         const isNew = age < 60000; // appeared in last 1 min of replay time

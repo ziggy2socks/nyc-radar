@@ -1,11 +1,11 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { RadarCanvas } from './RadarCanvas';
-import { fetchComplaints, getComplaintColor, getTopComplaintTypes } from './complaints';
+import { fetchComplaints, fetchComplaintsForDate, getComplaintColor, getTopComplaintTypes } from './complaints';
 import type { Complaint } from './complaints';
 import './App.css';
 
 const MAX_FEED = 50;
-const DOT_LIFETIME_MS = 10 * 60 * 1000; // 10 minutes visible
+const DOT_LIFETIME_MS = 60 * 60 * 1000; // 1 hour visible
 const SPEEDS = [1, 2, 4, 8, 16];
 
 export default function App() {
@@ -31,35 +31,44 @@ export default function App() {
   playingRef.current = playing;
   speedRef.current = SPEEDS[speedIdx];
 
-  // Fetch yesterday's data
+  const [selectedDate, setSelectedDate] = useState(''); // YYYY-MM-DD
+
+  function initializeData(data: Complaint[], dateStr: string) {
+    const types = getTopComplaintTypes(data, 16);
+    setComplaints(data);
+    setTopTypes(types);
+    setActiveTypes(new Set(types));
+    setFeed([]);
+
+    const months = ['JAN','FEB','MAR','APR','MAY','JUN','JUL','AUG','SEP','OCT','NOV','DEC'];
+    const d = new Date(dateStr + 'T12:00:00');
+    setDataDate(`${months[d.getMonth()]} ${d.getDate()}`);
+    setSelectedDate(dateStr);
+
+    // Initialize replay to current NYC time-of-day mapped to the data date
+    const nycNow = new Date(new Date().toLocaleString('en-US', { timeZone: 'America/New_York' }));
+    const nycMidnight = new Date(nycNow.getFullYear(), nycNow.getMonth(), nycNow.getDate()).getTime();
+    const nycTimeOfDay = nycNow.getTime() - nycMidnight;
+    const dataStart = new Date(dateStr + 'T00:00:00').getTime();
+    const startReplay = dataStart + nycTimeOfDay;
+    setReplayTime(startReplay);
+    replayRef.current = startReplay;
+    pingedRef.current.clear();
+  }
+
+  const pingedRef = useRef<Set<string>>(new Set());
+
+  // Initial load
   useEffect(() => {
     async function load() {
       try {
-        const data = await fetchComplaints();
+        const { data, date } = await fetchComplaints();
         if (data.length === 0) {
-          setError('No 311 data available for yesterday');
+          setError('No 311 data available');
           setLoading(false);
           return;
         }
-        const types = getTopComplaintTypes(data, 16);
-        setComplaints(data);
-        setTopTypes(types);
-        setActiveTypes(new Set(types));
-
-        // Set data date label
-        const firstDate = new Date(data[0].created_date);
-        const months = ['JAN','FEB','MAR','APR','MAY','JUN','JUL','AUG','SEP','OCT','NOV','DEC'];
-        setDataDate(`${months[firstDate.getMonth()]} ${firstDate.getDate()}`);
-
-        // Initialize replay to current NYC time-of-day mapped to yesterday
-        // Get current time in America/New_York
-        const nycNow = new Date(new Date().toLocaleString('en-US', { timeZone: 'America/New_York' }));
-        const nycMidnight = new Date(nycNow.getFullYear(), nycNow.getMonth(), nycNow.getDate()).getTime();
-        const nycTimeOfDay = nycNow.getTime() - nycMidnight; // ms since midnight ET
-        const yesterdayStart = new Date(firstDate.getFullYear(), firstDate.getMonth(), firstDate.getDate()).getTime();
-        const startReplay = yesterdayStart + nycTimeOfDay;
-        setReplayTime(startReplay);
-        replayRef.current = startReplay;
+        initializeData(data, date);
       } catch (e) {
         setError('Failed to load 311 data');
         console.error(e);
@@ -69,6 +78,28 @@ export default function App() {
     }
     load();
   }, []);
+
+  // Switch date
+  const switchDate = async (offset: number) => {
+    if (!selectedDate) return;
+    const current = new Date(selectedDate + 'T12:00:00');
+    current.setDate(current.getDate() + offset);
+    const newDate = current.toISOString().split('T')[0];
+    setLoading(true);
+    setError(null);
+    try {
+      const data = await fetchComplaintsForDate(newDate);
+      if (data.length === 0) {
+        setError(`No data for ${newDate}`);
+      } else {
+        initializeData(data, newDate);
+      }
+    } catch (e) {
+      setError('Failed to load data');
+    } finally {
+      setLoading(false);
+    }
+  };
 
   // Replay clock tick
   useEffect(() => {
@@ -143,8 +174,12 @@ export default function App() {
           <div className="title">NYC 311 RADAR</div>
           <div className="subtitle">COMPLAINT SCANNER</div>
           <div className="replay-info">
-            <div className="replay-date">REPLAY: {dataDate}</div>
-            <div className="replay-time">{timeStr}</div>
+            <div className="replay-date-row">
+              <button className="date-nav" onClick={() => switchDate(-1)}>◀</button>
+              <span className="replay-date">REPLAY: {dataDate}</span>
+              <button className="date-nav" onClick={() => switchDate(1)}>▶</button>
+            </div>
+            <div className="replay-time">{timeStr} ET</div>
             <div className="replay-delay">24H DELAY</div>
           </div>
           <div className="meta">

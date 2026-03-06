@@ -47,18 +47,15 @@ export function getComplaintColor(type: string): string {
 }
 
 /**
- * Fetch a full day of complaints (yesterday).
- * Returns sorted by created_date ASC (chronological order for replay).
+ * Fetch a full day of complaints for a given date string (YYYY-MM-DD).
+ * Returns sorted by created_date ASC (chronological for replay).
  */
-export async function fetchComplaints(): Promise<Complaint[]> {
+export async function fetchComplaintsForDate(dateStr: string): Promise<Complaint[]> {
   // NOTE: Never use URLSearchParams — encodes '$' as '%24' breaking Socrata
-  const now = new Date();
-  // Yesterday: full day
-  const yesterday = new Date(now.getTime() - 24 * 60 * 60 * 1000);
-  const dayStart = yesterday.toISOString().split('T')[0]; // "2026-03-05"
-  const dayEnd = now.toISOString().split('T')[0];         // "2026-03-06"
+  const nextDay = new Date(new Date(dateStr + 'T00:00:00').getTime() + 24 * 60 * 60 * 1000)
+    .toISOString().split('T')[0];
 
-  const qs = `$where=latitude+IS+NOT+NULL+AND+longitude+IS+NOT+NULL+AND+created_date>='${dayStart}'+AND+created_date<'${dayEnd}'&$order=created_date+ASC&$limit=10000`;
+  const qs = `$where=latitude+IS+NOT+NULL+AND+longitude+IS+NOT+NULL+AND+created_date>='${dateStr}'+AND+created_date<'${nextDay}'&$order=created_date+ASC&$limit=12000`;
 
   const res = await fetch(`/api/311?${qs}`, { cache: 'no-store' });
   if (!res.ok) {
@@ -66,6 +63,21 @@ export async function fetchComplaints(): Promise<Complaint[]> {
     throw new Error(`311 API error: ${res.status} — ${txt.slice(0, 200)}`);
   }
   return res.json();
+}
+
+/**
+ * Get the best available date (yesterday, or 2 days ago if yesterday has <500 records).
+ */
+export async function fetchComplaints(): Promise<{ data: Complaint[]; date: string }> {
+  // Try yesterday first
+  const yesterday = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString().split('T')[0];
+  const data = await fetchComplaintsForDate(yesterday);
+  if (data.length >= 500) return { data, date: yesterday };
+
+  // Fall back to 2 days ago
+  const twoDaysAgo = new Date(Date.now() - 2 * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
+  const fallback = await fetchComplaintsForDate(twoDaysAgo);
+  return { data: fallback.length > data.length ? fallback : data, date: fallback.length > data.length ? twoDaysAgo : yesterday };
 }
 
 export function getTopComplaintTypes(complaints: Complaint[], n = 12): string[] {
