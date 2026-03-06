@@ -127,11 +127,24 @@ export default function App() {
   // Compute "new" complaints that just appeared (for radar ping effect)
   const newThreshold = replayRef.current - 30000; // appeared in last 30s of replay time
 
+  // Queue pings and drip them into the feed one at a time
+  const pingQueueRef = useRef<Complaint[]>([]);
+
   const handlePing = useCallback((complaint: Complaint) => {
-    setFeed(prev => {
-      if (prev.length > 0 && prev[0].unique_key === complaint.unique_key) return prev;
-      return [complaint, ...prev].slice(0, MAX_FEED);
-    });
+    pingQueueRef.current.push(complaint);
+  }, []);
+
+  // Drip feed: add one item every 150ms for smooth scrolling
+  useEffect(() => {
+    const interval = setInterval(() => {
+      if (pingQueueRef.current.length === 0) return;
+      const next = pingQueueRef.current.shift()!;
+      setFeed(prev => {
+        if (prev.length > 0 && prev[0].unique_key === next.unique_key) return prev;
+        return [next, ...prev].slice(0, MAX_FEED);
+      });
+    }, 150);
+    return () => clearInterval(interval);
   }, []);
 
   const toggleType = (type: string) => {
@@ -238,7 +251,7 @@ export default function App() {
 
       {/* ── Right feed ── */}
       <div className="feed-panel">
-        <div className="feed-header">LIVE FEED</div>
+        <div className="feed-header">{dataDate || '—'} FEED</div>
         <div className="feed-list">
           {feed.length === 0 && (
             <div className="feed-empty">Waiting for signals…</div>

@@ -13,12 +13,12 @@ export const NYC_BOUNDS = {
 export const CENTER_LAT = (NYC_BOUNDS.minLat + NYC_BOUNDS.maxLat) / 2;
 export const CENTER_LON = (NYC_BOUNDS.minLon + NYC_BOUNDS.maxLon) / 2;
 
-// Scale to fit NYC in ~85% of the radar circle radius
+// Scale to fit NYC in ~115% of the radar circle radius (zoomed in ~30%, edges clip naturally)
 // Lat span ~0.443°, Lon span ~0.560° (lon is wider due to map aspect)
 // We scale to fit the wider dimension
 export function makeProjection(canvasSize: number) {
   const R = canvasSize / 2;  // radar radius in pixels
-  const usable = R * 0.85;   // use 85% of radius
+  const usable = R * 1.15;   // 115% = zoomed in ~30%, outer boroughs clip at edges
 
   const latSpan = NYC_BOUNDS.maxLat - NYC_BOUNDS.minLat;
   const lonSpan = NYC_BOUNDS.maxLon - NYC_BOUNDS.minLon;
