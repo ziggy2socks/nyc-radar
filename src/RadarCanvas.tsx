@@ -4,8 +4,11 @@ import { getComplaintColor } from './complaints';
 import { makeProjection } from './coordinates';
 
 interface Props {
-  complaints: Complaint[];
+  complaints: Complaint[];  // only currently-visible (filtered by App)
   activeTypes: Set<string>;
+  replayTime: number;       // current replay timestamp
+  dotLifetime: number;      // 10 min in ms
+  newThreshold: number;     // complaints newer than this get ping effect
   onPing: (complaint: Complaint) => void;
 }
 
@@ -13,26 +16,15 @@ const SIZE = 600;
 const R = SIZE / 2 - 2;
 const CX = SIZE / 2;
 const CY = SIZE / 2;
-const ROTATION_MS = 7000;
-const SWEEP_SPEED = (2 * Math.PI) / ROTATION_MS;
-const TRAIL_ARC = Math.PI / 2.2;
-const PING_LIFE = 5000;
-const DETECT_ARC = 0.12; // ~7 degrees
+const SWEEP_SPEED = (2 * Math.PI) / 7000; // visual sweep, 7s rotation
 
 interface DotInfo {
   key: string;
   complaint: Complaint;
   x: number;
   y: number;
-  angle: number;
   color: string;
-}
-
-interface Ping {
-  x: number;
-  y: number;
-  color: string;
-  born: number;
+  createdMs: number;
 }
 
 const project = makeProjection(SIZE);
@@ -59,25 +51,27 @@ fetch('/boroughs.geojson')
   })
   .catch(console.error);
 
-export function RadarCanvas({ complaints, activeTypes, onPing }: Props) {
+export function RadarCanvas({ complaints, replayTime, dotLifetime, newThreshold, onPing }: Props) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
-
-  // All mutable state in refs — NO dependency on React state in the draw loop
-  const dotsRef = useRef<DotInfo[]>([]);
-  const pingsRef = useRef<Ping[]>([]);
-  const sweptRef = useRef<Set<string>>(new Set());
   const angleRef = useRef(-Math.PI / 2);
   const lastTsRef = useRef(0);
+  const dotsRef = useRef<DotInfo[]>([]);
+  const replayRef = useRef(replayTime);
+  const dotLifeRef = useRef(dotLifetime);
+  const newThreshRef = useRef(newThreshold);
   const onPingRef = useRef(onPing);
+  const pingedRef = useRef<Set<string>>(new Set());
 
-  // Keep onPing ref current
+  // Keep refs current without restarting RAF
+  replayRef.current = replayTime;
+  dotLifeRef.current = dotLifetime;
+  newThreshRef.current = newThreshold;
   onPingRef.current = onPing;
 
-  // Pre-compute dots when data/filters change — write to ref, no RAF restart
+  // Pre-compute dot positions
   useMemo(() => {
     const result: DotInfo[] = [];
     for (const c of complaints) {
-      if (!activeTypes.has(c.complaint_type)) continue;
       const lat = parseFloat(c.latitude ?? '');
       const lon = parseFloat(c.longitude ?? '');
       if (isNaN(lat) || isNaN(lon)) continue;
@@ -85,14 +79,26 @@ export function RadarCanvas({ complaints, activeTypes, onPing }: Props) {
       const dx = x - CX;
       const dy = y - CY;
       if (dx * dx + dy * dy > R * R) continue;
-      const angle = (Math.atan2(dy, dx) + 2 * Math.PI) % (2 * Math.PI);
-      result.push({ key: c.unique_key, complaint: c, x, y, angle, color: getComplaintColor(c.complaint_type) });
+      result.push({
+        key: c.unique_key,
+        complaint: c,
+        x, y,
+        color: getComplaintColor(c.complaint_type),
+        createdMs: new Date(c.created_date).getTime(),
+      });
     }
     dotsRef.current = result;
-    sweptRef.current.clear();
-  }, [complaints, activeTypes]);
 
-  // Single RAF loop — started once, never restarted
+    // Fire onPing for newly appeared dots
+    for (const d of result) {
+      if (!pingedRef.current.has(d.key)) {
+        pingedRef.current.add(d.key);
+        onPingRef.current(d.complaint);
+      }
+    }
+  }, [complaints]);
+
+  // Single RAF loop — never restarts
   useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
@@ -102,15 +108,11 @@ export function RadarCanvas({ complaints, activeTypes, onPing }: Props) {
     function draw(ts: number) {
       const dt = lastTsRef.current ? Math.min(ts - lastTsRef.current, 50) : 16;
       lastTsRef.current = ts;
-
-      const prev = angleRef.current;
-      angleRef.current = (prev + SWEEP_SPEED * dt) % (2 * Math.PI);
+      angleRef.current = (angleRef.current + SWEEP_SPEED * dt) % (2 * Math.PI);
       const sweep = angleRef.current;
+      const now = replayRef.current;
+      const lifetime = dotLifeRef.current;
 
-      // Clear on wrap
-      if (sweep < prev) sweptRef.current.clear();
-
-      // ── Draw ─────────────────────────────────────────
       ctx.clearRect(0, 0, SIZE, SIZE);
       ctx.save();
       ctx.beginPath();
@@ -122,7 +124,7 @@ export function RadarCanvas({ complaints, activeTypes, onPing }: Props) {
       ctx.fillRect(0, 0, SIZE, SIZE);
 
       // Grid rings
-      ctx.strokeStyle = 'rgba(0,180,200,0.12)';
+      ctx.strokeStyle = 'rgba(0,180,200,0.10)';
       ctx.lineWidth = 0.5;
       for (let r = R / 4; r <= R; r += R / 4) {
         ctx.beginPath();
@@ -131,7 +133,7 @@ export function RadarCanvas({ complaints, activeTypes, onPing }: Props) {
       }
 
       // Crosshairs
-      ctx.strokeStyle = 'rgba(0,180,200,0.07)';
+      ctx.strokeStyle = 'rgba(0,180,200,0.06)';
       ctx.setLineDash([3, 8]);
       ctx.beginPath();
       ctx.moveTo(CX - R, CY); ctx.lineTo(CX + R, CY);
@@ -142,7 +144,7 @@ export function RadarCanvas({ complaints, activeTypes, onPing }: Props) {
       // Borough fills + outlines
       ctx.fillStyle = 'rgba(0,160,190,0.05)';
       for (const p of boroughPaths) ctx.fill(p);
-      ctx.strokeStyle = 'rgba(0,200,220,0.25)';
+      ctx.strokeStyle = 'rgba(0,200,220,0.22)';
       ctx.lineWidth = 0.8;
       for (const p of boroughPaths) ctx.stroke(p);
 
@@ -150,17 +152,17 @@ export function RadarCanvas({ complaints, activeTypes, onPing }: Props) {
       ctx.save();
       ctx.beginPath();
       ctx.moveTo(CX, CY);
-      ctx.arc(CX, CY, R, sweep - TRAIL_ARC, sweep);
+      ctx.arc(CX, CY, R, sweep - Math.PI / 2.2, sweep);
       ctx.closePath();
       const g = ctx.createRadialGradient(CX, CY, 0, CX, CY, R);
       g.addColorStop(0, 'rgba(0,220,255,0)');
-      g.addColorStop(0.6, 'rgba(0,220,255,0.04)');
-      g.addColorStop(1, 'rgba(0,220,255,0.13)');
+      g.addColorStop(0.6, 'rgba(0,220,255,0.03)');
+      g.addColorStop(1, 'rgba(0,220,255,0.10)');
       ctx.fillStyle = g;
       ctx.fill();
       ctx.restore();
 
-      // Sweep leading edge
+      // Sweep line
       ctx.save();
       ctx.strokeStyle = 'rgba(0,255,255,0.9)';
       ctx.lineWidth = 1.5;
@@ -172,51 +174,40 @@ export function RadarCanvas({ complaints, activeTypes, onPing }: Props) {
       ctx.stroke();
       ctx.restore();
 
-      // Dim dots (always visible)
+      // Draw dots — brightness based on age
       const dots = dotsRef.current;
       for (let i = 0; i < dots.length; i++) {
         const d = dots[i];
-        ctx.fillStyle = d.color;
-        ctx.globalAlpha = 0.12;
-        ctx.beginPath();
-        ctx.arc(d.x, d.y, 1.5, 0, 2 * Math.PI);
-        ctx.fill();
-      }
-      ctx.globalAlpha = 1;
+        const age = now - d.createdMs; // ms since this complaint appeared
+        if (age < 0 || age > lifetime) continue;
 
-      // Sweep detection
-      const now = ts;
-      for (let i = 0; i < dots.length; i++) {
-        const d = dots[i];
-        if (sweptRef.current.has(d.key)) continue;
-        const diff = (sweep - d.angle + 2 * Math.PI) % (2 * Math.PI);
-        if (diff < DETECT_ARC) {
-          sweptRef.current.add(d.key);
-          pingsRef.current.push({ x: d.x, y: d.y, color: d.color, born: now });
-          onPingRef.current(d.complaint);
-        }
-      }
+        const freshness = 1 - age / lifetime; // 1 = brand new, 0 = about to expire
+        const isNew = age < 60000; // appeared in last 1 min of replay time
 
-      // Draw pings (bright, fading)
-      const alive: Ping[] = [];
-      for (let i = 0; i < pingsRef.current.length; i++) {
-        const p = pingsRef.current[i];
-        const age = now - p.born;
-        if (age >= PING_LIFE) continue;
-        alive.push(p);
-        const alpha = 1 - age / PING_LIFE;
-        const r = 1.5 + (age / PING_LIFE) * 3;
         ctx.save();
-        ctx.globalAlpha = alpha;
-        ctx.fillStyle = p.color;
-        ctx.shadowColor = p.color;
-        ctx.shadowBlur = 10 * alpha;
-        ctx.beginPath();
-        ctx.arc(p.x, p.y, r, 0, 2 * Math.PI);
-        ctx.fill();
+        if (isNew) {
+          // Bright ping effect for new complaints
+          const pingPhase = age / 60000; // 0–1 over first minute
+          const glow = 1 - pingPhase;
+          ctx.globalAlpha = 0.6 + 0.4 * glow;
+          ctx.fillStyle = d.color;
+          ctx.shadowColor = d.color;
+          ctx.shadowBlur = 15 * glow;
+          ctx.beginPath();
+          ctx.arc(d.x, d.y, 3 + 3 * glow, 0, 2 * Math.PI);
+          ctx.fill();
+        } else {
+          // Fading dot
+          ctx.globalAlpha = 0.15 + 0.5 * freshness;
+          ctx.fillStyle = d.color;
+          ctx.shadowColor = d.color;
+          ctx.shadowBlur = 4 * freshness;
+          ctx.beginPath();
+          ctx.arc(d.x, d.y, 1.5 + freshness * 1.5, 0, 2 * Math.PI);
+          ctx.fill();
+        }
         ctx.restore();
       }
-      pingsRef.current = alive;
 
       // Center dot
       ctx.save();
@@ -242,7 +233,7 @@ export function RadarCanvas({ complaints, activeTypes, onPing }: Props) {
 
     raf = requestAnimationFrame(draw);
     return () => cancelAnimationFrame(raf);
-  }, []); // ← EMPTY DEPS — never restarts
+  }, []); // empty deps — never restarts
 
   return (
     <canvas

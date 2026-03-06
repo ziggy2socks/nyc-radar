@@ -12,7 +12,7 @@ export interface Complaint {
   status?: string;
 }
 
-// Top complaint categories with colors (cyan palette variants)
+// Top complaint categories with colors
 export const COMPLAINT_COLORS: Record<string, string> = {
   'Noise - Residential':     '#00ccff',
   'Noise - Commercial':      '#00aadd',
@@ -39,23 +39,26 @@ export const COMPLAINT_COLORS: Record<string, string> = {
 export const DEFAULT_COLOR = '#00ccff';
 
 export function getComplaintColor(type: string): string {
-  // Try exact match first
   if (COMPLAINT_COLORS[type]) return COMPLAINT_COLORS[type];
-  // Try partial match
   const key = Object.keys(COMPLAINT_COLORS).find(k =>
     type.toLowerCase().includes(k.toLowerCase()) || k.toLowerCase().includes(type.toLowerCase())
   );
   return key ? COMPLAINT_COLORS[key] : DEFAULT_COLOR;
 }
 
+/**
+ * Fetch a full day of complaints (yesterday).
+ * Returns sorted by created_date ASC (chronological order for replay).
+ */
 export async function fetchComplaints(): Promise<Complaint[]> {
   // NOTE: Never use URLSearchParams — encodes '$' as '%24' breaking Socrata
-  // Use simple date string (YYYY-MM-DD) — Socrata handles it fine
-  const since = new Date(Date.now() - 24 * 60 * 60 * 1000)
-    .toISOString()
-    .split('T')[0];  // "2026-03-05"
+  const now = new Date();
+  // Yesterday: full day
+  const yesterday = new Date(now.getTime() - 24 * 60 * 60 * 1000);
+  const dayStart = yesterday.toISOString().split('T')[0]; // "2026-03-05"
+  const dayEnd = now.toISOString().split('T')[0];         // "2026-03-06"
 
-  const qs = `$where=latitude+IS+NOT+NULL+AND+longitude+IS+NOT+NULL+AND+created_date>'${since}'&$order=created_date+DESC&$limit=2000`;
+  const qs = `$where=latitude+IS+NOT+NULL+AND+longitude+IS+NOT+NULL+AND+created_date>='${dayStart}'+AND+created_date<'${dayEnd}'&$order=created_date+ASC&$limit=10000`;
 
   const res = await fetch(`/api/311?${qs}`, { cache: 'no-store' });
   if (!res.ok) {

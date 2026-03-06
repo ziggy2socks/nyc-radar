@@ -1,10 +1,12 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { RadarCanvas } from './RadarCanvas';
 import { fetchComplaints, getComplaintColor, getTopComplaintTypes } from './complaints';
 import type { Complaint } from './complaints';
 import './App.css';
 
-const MAX_FEED = 40;
+const MAX_FEED = 50;
+const DOT_LIFETIME_MS = 10 * 60 * 1000; // 10 minutes visible
+const SPEEDS = [1, 2, 4, 8, 16];
 
 export default function App() {
   const [complaints, setComplaints] = useState<Complaint[]>([]);
@@ -13,14 +15,50 @@ export default function App() {
   const [feed, setFeed] = useState<Complaint[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+
+  // Replay clock state
+  const [replayTime, setReplayTime] = useState<number>(0); // ms timestamp in "yesterday"
+  const [playing, setPlaying] = useState(true);
+  const [speedIdx, setSpeedIdx] = useState(0);
+  const [dataDate, setDataDate] = useState<string>(''); // "MAR 5" display string
+
+  // Refs for the animation tick
+  const playingRef = useRef(playing);
+  const speedRef = useRef(SPEEDS[0]);
+  const replayRef = useRef(0);
+  const lastTickRef = useRef(0);
+
+  playingRef.current = playing;
+  speedRef.current = SPEEDS[speedIdx];
+
+  // Fetch yesterday's data
   useEffect(() => {
     async function load() {
       try {
         const data = await fetchComplaints();
+        if (data.length === 0) {
+          setError('No 311 data available for yesterday');
+          setLoading(false);
+          return;
+        }
         const types = getTopComplaintTypes(data, 16);
         setComplaints(data);
         setTopTypes(types);
         setActiveTypes(new Set(types));
+
+        // Set data date label
+        const firstDate = new Date(data[0].created_date);
+        const months = ['JAN','FEB','MAR','APR','MAY','JUN','JUL','AUG','SEP','OCT','NOV','DEC'];
+        setDataDate(`${months[firstDate.getMonth()]} ${firstDate.getDate()}`);
+
+        // Initialize replay to current time-of-day mapped to yesterday
+        const now = new Date();
+        const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
+        const timeOfDay = now.getTime() - todayStart; // ms since midnight
+        const yesterdayStart = new Date(firstDate.getFullYear(), firstDate.getMonth(), firstDate.getDate()).getTime();
+        const startReplay = yesterdayStart + timeOfDay;
+        setReplayTime(startReplay);
+        replayRef.current = startReplay;
       } catch (e) {
         setError('Failed to load 311 data');
         console.error(e);
@@ -29,12 +67,39 @@ export default function App() {
       }
     }
     load();
-    const interval = setInterval(load, 5 * 60 * 1000);
-    return () => clearInterval(interval);
   }, []);
 
+  // Replay clock tick
+  useEffect(() => {
+    let raf: number;
+    function tick(ts: number) {
+      if (lastTickRef.current && playingRef.current) {
+        const dt = Math.min(ts - lastTickRef.current, 50);
+        replayRef.current += dt * speedRef.current;
+        setReplayTime(replayRef.current);
+      }
+      lastTickRef.current = ts;
+      raf = requestAnimationFrame(tick);
+    }
+    raf = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(raf);
+  }, []);
+
+  // Compute visible complaints based on replay time
+  const visibleComplaints = complaints.filter(c => {
+    if (!activeTypes.has(c.complaint_type)) return false;
+    const t = new Date(c.created_date).getTime();
+    return t <= replayRef.current && t > replayRef.current - DOT_LIFETIME_MS;
+  });
+
+  // Compute "new" complaints that just appeared (for radar ping effect)
+  const newThreshold = replayRef.current - 30000; // appeared in last 30s of replay time
+
   const handlePing = useCallback((complaint: Complaint) => {
-    setFeed(prev => [complaint, ...prev].slice(0, MAX_FEED));
+    setFeed(prev => {
+      if (prev.length > 0 && prev[0].unique_key === complaint.unique_key) return prev;
+      return [complaint, ...prev].slice(0, MAX_FEED);
+    });
   }, []);
 
   const toggleType = (type: string) => {
@@ -50,7 +115,24 @@ export default function App() {
     else setActiveTypes(new Set(topTypes));
   };
 
-  const filteredComplaints = complaints.filter(c => activeTypes.has(c.complaint_type));
+  const cycleSpeed = () => {
+    setSpeedIdx(prev => (prev + 1) % SPEEDS.length);
+  };
+
+  const skipBack = () => {
+    replayRef.current -= 15 * 60 * 1000; // -15 min
+    setReplayTime(replayRef.current);
+    setFeed([]);
+  };
+
+  const skipForward = () => {
+    replayRef.current += 15 * 60 * 1000; // +15 min
+    setReplayTime(replayRef.current);
+  };
+
+  // Format replay time as HH:MM:SS
+  const replayDate = new Date(replayTime);
+  const timeStr = replayDate.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false });
 
   return (
     <div className="app">
@@ -58,10 +140,27 @@ export default function App() {
       <div className="sidebar">
         <div className="sidebar-header">
           <div className="title">NYC 311 RADAR</div>
-          <div className="subtitle">LIVE COMPLAINT SCANNER</div>
-          <div className="meta">
-            {loading ? 'LOADING…' : `${filteredComplaints.length.toLocaleString()} SIGNALS · 24H`}
+          <div className="subtitle">COMPLAINT SCANNER</div>
+          <div className="replay-info">
+            <div className="replay-date">REPLAY: {dataDate}</div>
+            <div className="replay-time">{timeStr}</div>
+            <div className="replay-delay">24H DELAY</div>
           </div>
+          <div className="meta">
+            {loading ? 'LOADING…' : `${visibleComplaints.length} ACTIVE · ${complaints.length.toLocaleString()} TOTAL`}
+          </div>
+        </div>
+
+        {/* Playback controls */}
+        <div className="playback">
+          <button className="pb-btn" onClick={skipBack} title="Back 15 min">⏪</button>
+          <button className="pb-btn pb-play" onClick={() => setPlaying(!playing)}>
+            {playing ? '⏸' : '▶'}
+          </button>
+          <button className="pb-btn" onClick={skipForward} title="Forward 15 min">⏩</button>
+          <button className="pb-btn pb-speed" onClick={cycleSpeed}>
+            {SPEEDS[speedIdx]}×
+          </button>
         </div>
 
         <div className="filter-section">
@@ -92,8 +191,11 @@ export default function App() {
       {/* ── Radar ── */}
       <div className="radar-wrap">
         <RadarCanvas
-          complaints={filteredComplaints}
+          complaints={visibleComplaints}
           activeTypes={activeTypes}
+          replayTime={replayTime}
+          dotLifetime={DOT_LIFETIME_MS}
+          newThreshold={newThreshold}
           onPing={handlePing}
         />
       </div>
@@ -111,7 +213,9 @@ export default function App() {
               <div className="feed-content">
                 <div className="feed-type">{c.complaint_type}</div>
                 {c.descriptor && <div className="feed-desc">{c.descriptor}</div>}
-                <div className="feed-meta">{c.borough} · {new Date(c.created_date).toLocaleTimeString()}</div>
+                <div className="feed-meta">
+                  {c.borough} · {new Date(c.created_date).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })}
+                </div>
               </div>
             </div>
           ))}
