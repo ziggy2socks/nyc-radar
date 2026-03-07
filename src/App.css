@@ -436,8 +436,8 @@ html, body, #root {
   }
 
   .radar-canvas {
-    width: min(100vw, calc(100vh - 44px - var(--mobile-feed-h, 100px)));
-    height: min(100vw, calc(100vh - 44px - var(--mobile-feed-h, 100px)));
+    width: min(100vw, calc(100vh - 44px - 20vh));
+    height: min(100vw, calc(100vh - 44px - 20vh));
   }
 
   /* Sidebar — slide-in overlay from left */
@@ -460,7 +460,7 @@ html, body, #root {
   .feed-panel {
     position: relative;
     width: 100%;
-    height: var(--mobile-feed-h, 100px);
+    height: 20vh;
     flex-shrink: 0;
     border-left: none;
     border-top: 1px solid var(--border);
