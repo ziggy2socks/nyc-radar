@@ -108,19 +108,43 @@ export async function fetchComplaintsForDate(dateStr: string): Promise<Complaint
   return res.json();
 }
 
+/** Quick count check — avoids downloading 14MB just to discover a date is incomplete */
+async function countForDate(dateStr: string): Promise<number> {
+  const nextDay = new Date(new Date(dateStr + 'T00:00:00').getTime() + 86400000)
+    .toISOString().split('T')[0];
+  const qs = `$select=count(*)&$where=created_date>='${dateStr}'+AND+created_date<'${nextDay}'`;
+  const res = await fetch(`/api/311?${qs}`, { cache: 'no-store' });
+  if (!res.ok) return 0;
+  const rows = await res.json();
+  return parseInt(rows?.[0]?.count ?? '0', 10);
+}
+
+/** NYC-relative "yesterday" — always uses America/New_York */
+function nycYesterday(daysBack: number): string {
+  const nycNow = new Date(new Date().toLocaleString('en-US', { timeZone: 'America/New_York' }));
+  const d = new Date(nycNow.getFullYear(), nycNow.getMonth(), nycNow.getDate());
+  d.setDate(d.getDate() - daysBack);
+  return d.toISOString().split('T')[0];
+}
+
 /**
- * Get the best available date (yesterday, or 2 days ago if yesterday has <500 records).
+ * Get the best available date. Checks counts first (tiny request) to find a
+ * complete day, then fetches only that day's full data.
  */
 export async function fetchComplaints(): Promise<{ data: Complaint[]; date: string }> {
-  // Try yesterday first
-  const yesterday = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString().split('T')[0];
-  const data = await fetchComplaintsForDate(yesterday);
-  if (data.length >= 500) return { data, date: yesterday };
-
-  // Fall back to 2 days ago
-  const twoDaysAgo = new Date(Date.now() - 2 * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
-  const fallback = await fetchComplaintsForDate(twoDaysAgo);
-  return { data: fallback.length > data.length ? fallback : data, date: fallback.length > data.length ? twoDaysAgo : yesterday };
+  // Check up to 3 days back to find a complete dataset
+  for (let i = 1; i <= 3; i++) {
+    const dateStr = nycYesterday(i);
+    const count = await countForDate(dateStr);
+    if (count >= 500) {
+      const data = await fetchComplaintsForDate(dateStr);
+      return { data, date: dateStr };
+    }
+  }
+  // Last resort — fetch whatever 3 days ago has
+  const fallbackDate = nycYesterday(3);
+  const data = await fetchComplaintsForDate(fallbackDate);
+  return { data, date: fallbackDate };
 }
 
 export function getTopComplaintTypes(complaints: Complaint[], n = 12): string[] {
